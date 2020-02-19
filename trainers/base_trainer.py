@@ -17,6 +17,8 @@ from mmcv.runner import load_checkpoint
 from utils.prune_utils import BNOptimizer
 import torch.nn as nn
 import torchvision
+import random
+
 class BaseTrainer:
     """
     Base class for all trainers
@@ -74,7 +76,7 @@ class BaseTrainer:
         else:  # iter or best
             ckptfile = torch.load(os.path.join(self.save_path, 'checkpoint-{}.pth'.format(self.args.EXPER.resume)))
             self.model.load_state_dict(ckptfile['state_dict'])
-            #load_checkpoint(self.model,ckptfile)
+            # load_checkpoint(self.model,ckptfile)
             if not self.args.finetune and not self.args.do_test and not self.args.Prune.do_test:
                 self.optimizer.load_state_dict(ckptfile['opti_dict'])
                 self.global_epoch = ckptfile['epoch']
@@ -89,9 +91,31 @@ class BaseTrainer:
         if self.args.EXPER.resume:
             self._load_ckpt()
 
+        # #--------------------
+        # from models.strongerv3_US import StrongerV3_US_dummy
+        # newmodel = StrongerV3_US_dummy(self.args.MODEL)
+        # from collections import OrderedDict
+        # statedic = []
+        # newdic = OrderedDict()
+        # for k2, v in self.model.state_dict().items():
+        #     if 'running' in k2 or 'num_batches_tracked' in k2:
+        #         continue
+        #     statedic.append(v)
+        # print(len(statedic))
+        # names = []
+        # for k1, v1 in newmodel.state_dict().items():
+        #     if 'running' in k1 or 'num_batches_tracked' in k1:
+        #         continue
+        #     names.append(k1)
+        # newdic = OrderedDict(zip(names, statedic))
+        # newmodel.load_state_dict(newdic, strict=False)
+        # torch.save({'state_dict':newmodel.state_dict()}
+        #            , os.path.join(self.save_path,'checkpoint-trans.pth'))
+        # assert 0
     def _prepare_device(self):
-        if len(self.args.devices)>1:
-            self.model=torch.nn.DataParallel(self.model)
+        if len(self.args.devices) > 1:
+            self.model = torch.nn.DataParallel(self.model)
+
     def _get_SummaryWriter(self):
         if not self.args.debug and not self.args.do_test:
             ensure_dir(os.path.join('./summary/', self.experiment_name))
@@ -122,18 +146,19 @@ class BaseTrainer:
     def updateBN(self):
         for m in self.sparseBN:
             m.weight.grad.data.add_(self.args.Prune.sr * torch.sign(m.weight.data))
+
     def train(self):
         if self.args.Prune.sparse:
-            allbns=[]
+            allbns = []
             print("start sparse mode")
             for m in self.model.named_modules():
                 if isinstance(m[1], nn.BatchNorm2d):
                     allbns.append(m[0])
-                    #if 'project_bn' in m[0] or 'dw_bn' in m[0] or 'residual_downsample' in m[0]:
+                    # if 'project_bn' in m[0] or 'dw_bn' in m[0] or 'residual_downsample' in m[0]:
                     if 'dw_bn' in m[0] or 'residual_downsample' in m[0]:
                         continue
                     self.sparseBN.append(m[1])
-            print("{}/{} bns will be sparsed.".format(len(self.sparseBN),len(allbns)))
+            print("{}/{} bns will be sparsed.".format(len(self.sparseBN), len(allbns)))
         for epoch in range(self.global_epoch, self.args.OPTIM.total_epoch):
             self.global_epoch += 1
             self._train_epoch()
@@ -143,7 +168,7 @@ class BaseTrainer:
             for k, v in self.logger_losses.items():
                 self.writer.add_scalar(k, v.get_avg(), global_step=self.global_iter)
             if epoch > 15:
-                results, imgs = self._valid_epoch()
+                results, imgs = self._valid_epoch(width_mult=1.0,cal_bn=False)
                 for k, v in zip(self.logger_custom, results):
                     self.writer.add_scalar(k, v, global_step=self.global_epoch)
                 for i in range(len(imgs)):
@@ -158,28 +183,31 @@ class BaseTrainer:
 
     def _train_epoch(self):
         self.model.train()
-        for i, inputs in tqdm(enumerate(self.train_dataloader),total=len(self.train_dataloader)):
+        # for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
+        for i, inputs in enumerate(self.train_dataloader):
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
             img, _, _, *labels = inputs
             self.global_iter += 1
-            if self.global_iter % 100 == 0:
+            if self.global_iter % 200 == 0:
                 print(self.global_iter)
                 for k, v in self.logger_losses.items():
                     print(k, ":", v.get_avg())
-            self.train_step(img, labels)
+            # self.train_step(img, labels)
+            self.train_step_US(img, labels)
 
     def train_step(self, imgs, labels):
         imgs = imgs.cuda()
         labels = [label.cuda() for label in labels]
         label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
         outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
-        GIOUloss,conf_loss,probloss = yololoss(self.args.MODEL,outsmall, outmid, outlarge, predsmall, predmid, predlarge,
-                             label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
-        GIOUloss=GIOUloss.sum()/imgs.shape[0]
-        conf_loss=conf_loss.sum()/imgs.shape[0]
-        probloss=probloss.sum()/imgs.shape[0]
+        GIOUloss, conf_loss, probloss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
+                                                 predlarge,
+                                                 label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
+        GIOUloss = GIOUloss.sum() / imgs.shape[0]
+        conf_loss = conf_loss.sum() / imgs.shape[0]
+        probloss = probloss.sum() / imgs.shape[0]
 
-        totalloss = GIOUloss+conf_loss+probloss
+        totalloss = GIOUloss + conf_loss + probloss
         self.optimizer.zero_grad()
         totalloss.backward()
         if self.args.Prune.sparse:
@@ -188,8 +216,58 @@ class BaseTrainer:
         self.LossBox.update(GIOUloss.item())
         self.LossConf.update(conf_loss.item())
         self.LossClass.update(probloss.item())
+    def train_step_US(self, imgs, labels):
+        imgs = imgs.cuda()
+        labels = [label.cuda() for label in labels]
+        label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
+        self.optimizer.zero_grad()
+        widths_train = []
+        for _ in range(4 - 2):
+            widths_train.append(
+                random.uniform(0.4, 1.0))
+            widths_train = [1.0,0.4] + widths_train
+        for idx,width_mult in enumerate(widths_train):
+            self.model.apply(lambda m: setattr(m, 'width_mult',width_mult))
+            outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
+            GIOUloss, conf_loss, probloss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
+                                                     predlarge,
+                                                     label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
+            GIOUloss = GIOUloss.sum() / imgs.shape[0]
+            conf_loss = conf_loss.sum() / imgs.shape[0]
+            probloss = probloss.sum() / imgs.shape[0]
 
-    def _valid_epoch(self,validiter=-1):
+            totalloss = GIOUloss + conf_loss + probloss
+            totalloss.backward()
+            if idx==0:
+                self.LossBox.update(GIOUloss.item())
+                self.LossConf.update(conf_loss.item())
+                self.LossClass.update(probloss.item())
+        self.optimizer.step()
+
+    def _valid_epoch(self, validiter=-1,width_mult=-1,cal_bn=False,verbose=False):
+        # cal_bn=True
+        # width_mult=1.0
+        def bn_calibration_init(m):
+            """ calculating post-statistics of batch normalization """
+            if getattr(m, 'track_running_stats', False):
+                m.reset_running_stats()
+                m.training = True
+        # width_mult=0.8
+        if width_mult!=-1:
+            self.model.apply(lambda m: setattr(
+                m, 'width_mult',
+                width_mult))
+        if cal_bn:
+            if width_mult not in [0.4,1.0]:
+                self.model.apply(bn_calibration_init)
+                for idx_batch, inputs in enumerate(self.train_dataloader):
+                    if idx_batch==100:
+                        break
+                    inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
+                    (imgs, imgpath, ori_shapes, *_) = inputs
+                    imgs = imgs.cuda()
+                    with torch.no_grad():
+                        self.model(imgs)
         def _postprocess(pred_bbox, test_input_size, org_img_shape):
             if self.args.MODEL.boxloss == 'KL':
                 pred_coor = pred_bbox[:, 0:4]
@@ -207,13 +285,13 @@ class BaseTrainer:
             dh = (test_input_size - resize_ratio * org_h) / 2
             pred_coor[:, 0::2] = 1.0 * (pred_coor[:, 0::2] - dw) / resize_ratio
             pred_coor[:, 1::2] = 1.0 * (pred_coor[:, 1::2] - dh) / resize_ratio
-            x1,y1,x2,y2=torch.split(pred_coor,[1,1,1,1],dim=1)
-            x1,y1=torch.max(x1,torch.zeros_like(x1)),torch.max(y1,torch.zeros_like(y1))
-            x2,y2=torch.min(x2,torch.ones_like(x2)*(org_w-1)),torch.min(y2,torch.ones_like(y2)*(org_h-1))
-            pred_coor=torch.cat([x1,y1,x2,y2],dim=-1)
+            x1, y1, x2, y2 = torch.split(pred_coor, [1, 1, 1, 1], dim=1)
+            x1, y1 = torch.max(x1, torch.zeros_like(x1)), torch.max(y1, torch.zeros_like(y1))
+            x2, y2 = torch.min(x2, torch.ones_like(x2) * (org_w - 1)), torch.min(y2, torch.ones_like(y2) * (org_h - 1))
+            pred_coor = torch.cat([x1, y1, x2, y2], dim=-1)
 
             # ***********************
-            if pred_prob.shape[-1]==0:
+            if pred_prob.shape[-1] == 0:
                 pred_prob = torch.ones((pred_prob.shape[0], 1)).cuda()
             # ***********************
             scores = pred_conf.unsqueeze(-1) * pred_prob
@@ -221,10 +299,12 @@ class BaseTrainer:
             if self.args.MODEL.boxloss == 'KL' and self.args.EVAL.varvote:
                 return bboxes, pred_vari
             else:
-                return bboxes,None
+                return bboxes, None
+
         s = time.time()
         self.model.eval()
-        for idx_batch, inputs in tqdm(enumerate(self.test_dataloader),total=len(self.test_dataloader)):
+        # for idx_batch, inputs in tqdm(enumerate(self.test_dataloader), total=len(self.test_dataloader)):
+        for idx_batch, inputs in enumerate(self.test_dataloader):
             if idx_batch == validiter:  # to save time
                 break
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
@@ -234,9 +314,9 @@ class BaseTrainer:
             with torch.no_grad():
                 outputs = self.model(imgs)
             for imgidx in range(len(outputs)):
-                bbox,bboxvari = _postprocess(outputs[imgidx], imgs.shape[-1], ori_shapes[imgidx])
-                nms_boxes, nms_scores, nms_labels = torch_nms(self.args.EVAL,bbox,
-                                                                 variance=bboxvari)
+                bbox, bboxvari = _postprocess(outputs[imgidx], imgs.shape[-1], ori_shapes[imgidx])
+                nms_boxes, nms_scores, nms_labels = torch_nms(self.args.EVAL, bbox,
+                                                              variance=bboxvari)
                 if nms_boxes is not None:
                     self.TESTevaluator.append(imgpath[imgidx][0],
                                               nms_boxes.cpu().numpy(),
@@ -244,6 +324,7 @@ class BaseTrainer:
                                               nms_labels.cpu().numpy())
         results = self.TESTevaluator.evaluate()
         imgs = self.TESTevaluator.visual_imgs
-        for k, v in zip(self.logger_custom, results):
-            print("{}:{}".format(k, v))
+        if verbose:
+            for k, v in zip(self.logger_custom, results):
+                print("{}:{}".format(k, v))
         return results, imgs

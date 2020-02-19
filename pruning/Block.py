@@ -42,6 +42,8 @@ class CB(Baselayer):
         # self.bnscale = self.statedict[1]
 
     def clone2module(self, module: nn.Module, inputmask,keepoutput=False):
+        if self.bnscale is None:
+            keepoutput=True
         modulelayers = [m for m in module.modules() if isinstance(m, nn.Conv2d) or isinstance(m, nn.BatchNorm2d)]
         temp = self.statedict[0][:, inputmask.tolist(), :, :]
         if keepoutput:
@@ -89,7 +91,10 @@ class InverRes(Baselayer):
             # self.bnscale=self.statedict[1]
         else:
             self.bnscale=None
+        self.inputmask=None
     def clone2module(self, module: nn.Module, inputmask,keepoutput=False):
+        if self.inputmask is not None:
+            inputmask=self.inputmask
         modulelayers = [m for m in module.modules() if isinstance(m, nn.Conv2d) or isinstance(m, nn.BatchNorm2d)]
         if self.numlayer == 2:
             modulelayers[0].weight.data = self.statedict[0][inputmask.tolist(), :, :, :].clone()
@@ -107,10 +112,21 @@ class InverRes(Baselayer):
             modulelayers[2].weight.data = self.statedict[5][self.prunemask.tolist(),:,:,:]
             modulelayers[2].groups=self.prunemask.shape[0]
             self._cloneBN(modulelayers[3],self.statedict[6:10],self.prunemask)
-
             modulelayers[4].weight.data = self.statedict[10][:, self.prunemask.tolist(), :, :]
             self._cloneBN(modulelayers[5], self.statedict[11:15], torch.arange(self.statedict[11].shape[0]))
-            self.outmask=torch.arange(self.statedict[11].shape[0])
+            self.outmask = torch.arange(self.statedict[11].shape[0])
+            #TODO check right?
+            # if not module.use_res_connect:
+            #     modulelayers[4].weight.data = self.statedict[10][:, self.prunemask.tolist(), :, :]
+            #     self._cloneBN(modulelayers[5], self.statedict[11:15], torch.arange(self.statedict[11].shape[0]))
+            #     self.outmask=torch.arange(self.statedict[11].shape[0])
+            # else:
+            #     temp=self.statedict[10][:,self.prunemask.tolist(), :, :]
+            #     modulelayers[4].weight.data = temp[inputmask.tolist(),:,:,:]
+            #     self._cloneBN(modulelayers[5], self.statedict[11:15],inputmask)
+            #     self.outmask = inputmask
+
+
 class FC(Baselayer):
     def __init__(self, layername: str, id: int, input:list, statedict: list):
         super().__init__(layername, id, input, statedict)

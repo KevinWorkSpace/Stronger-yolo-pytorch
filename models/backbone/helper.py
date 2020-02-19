@@ -6,10 +6,13 @@ def load_mobilev2(model,ckpt):
     statedict=model.state_dict()
     newstatedict=OrderedDict()
     for k,v in model.state_dict().items():
-        if 'num_batches_tracked' in k:
+        if 'num_batches_tracked' in k or 'bn_notsave' in k:
             statedict.pop(k)
     for idx,((k,v),(k2,v2)) in enumerate(zip(statedict.items(),weights.items())):
         newstatedict.update({k:v2})
+    for k,v in model.state_dict().items():
+        if 'num_batches_tracked' in k or 'bn_notsave' in k:
+            newstatedict.update({k:v})
     model.load_state_dict(newstatedict)
     print("successfully load ckpt mobilev2")
 def load_tf_weights(model,ckpt):

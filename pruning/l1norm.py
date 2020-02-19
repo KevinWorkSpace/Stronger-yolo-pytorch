@@ -66,45 +66,44 @@ class l1normPruner(BasePruner):
                 mask = torch.zeros_like(pruneweight).long()
                 mask[_descend] = 1
                 b.prunemask = torch.where(mask == 1)[0]
-        blockidx = 0
-
-        for name, m0 in self.newmodel.named_modules():
-            if type(m0) not in [InvertedResidual, conv_bn, nn.Linear, sepconv_bn,conv_bias]:
-                continue
-            block = blocks[blockidx]
-            curstatedict = block.statedict
-            if (len(block.inputlayer) == 1):
-                if block.inputlayer[0] is None:
-                    inputmask = torch.arange(block.inputchannel)
-                else:
-                    inputmask = block.inputlayer[0].outmask
-            elif (len(block.inputlayer) == 2):
-                first = block.inputlayer[0].outmask
-                second = block.inputlayer[1].outmask
-                second+=block.inputlayer[0].outputchannel
-                second=second.to(first.device)
-                inputmask=torch.cat((first,second),0)
-            else:
-                raise AttributeError
-            if isinstance(block, CB):
-                # conv(1weight)->bn(4weight)->relu
-                assert len(curstatedict) == (1 + 4)
-                block.clone2module(m0, inputmask)
-            if isinstance(block, DCB):
-                # conv(1weight)->bn(4weight)->relu
-                assert len(curstatedict) == (1 + 4 + 1 + 4)
-                block.clone2module(m0, inputmask)
-            if isinstance(block, InverRes):
-                # dw->project or expand->dw->project
-                assert len(curstatedict) in (10, 15)
-                block.clone2module(m0, inputmask)
-            if isinstance(block, FC):
-                block.clone2module(m0)
-            if isinstance(block, Conv):
-                block.clone2module(m0,inputmask)
-
-            blockidx += 1
-            if blockidx > (len(blocks) - 1): break
+        # blockidx = 0
+        # for name, m0 in self.newmodel.named_modules():
+        #     if type(m0) not in [InvertedResidual, conv_bn, nn.Linear, sepconv_bn,conv_bias]:
+        #         continue
+        #     block = blocks[blockidx]
+        #     curstatedict = block.statedict
+        #     if (len(block.inputlayer) == 1):
+        #         if block.inputlayer[0] is None:
+        #             inputmask = torch.arange(block.inputchannel)
+        #         else:
+        #             inputmask = block.inputlayer[0].outmask
+        #     elif (len(block.inputlayer) == 2):
+        #         first = block.inputlayer[0].outmask
+        #         second = block.inputlayer[1].outmask
+        #         second+=block.inputlayer[0].outputchannel
+        #         second=second.to(first.device)
+        #         inputmask=torch.cat((first,second),0)
+        #     else:
+        #         raise AttributeError
+        #     if isinstance(block, CB):
+        #         # conv(1weight)->bn(4weight)->relu
+        #         assert len(curstatedict) == (1 + 4)
+        #         block.clone2module(m0, inputmask)
+        #     if isinstance(block, DCB):
+        #         # conv(1weight)->bn(4weight)->relu
+        #         assert len(curstatedict) == (1 + 4 + 1 + 4)
+        #         block.clone2module(m0, inputmask)
+        #     if isinstance(block, InverRes):
+        #         # dw->project or expand->dw->project
+        #         assert len(curstatedict) in (10, 15)
+        #         block.clone2module(m0, inputmask)
+        #     if isinstance(block, FC):
+        #         block.clone2module(m0)
+        #     if isinstance(block, Conv):
+        #         block.clone2module(m0,inputmask)
+        #
+        #     blockidx += 1
+        #     if blockidx > (len(blocks) - 1): break
         print("l1 norm Pruner done")
         # print(name,block.outmask.shape)
 

@@ -76,9 +76,12 @@ class MobileNetV2(nn.Module):
     def forward(self, x):
         outs = []
         for i in range(len(self.features)):
+            # print(x.shape)
+            # print("**{}**".format(i),self.features[i])
             x = self.features[i](x)
             if i in self.out_indices:
                 outs.append(x)
+        # assert 0
         return outs
 def mobilenetv2(pretrained=None, **kwargs):
     model = MobileNetV2(width_mult=1.0)
@@ -99,9 +102,9 @@ def mobilenetv2_75(pretrained=None, **kwargs):
     return model
 if __name__ == '__main__':
     from thop import profile,clever_format
-    net=mobilenetv2_75('checkpoints/mobilenetv2_0.75.pth')
-    input=torch.ones(1,3,320,320)
-    flops, params = profile(net, inputs=(input,), verbose=False)
+    model=mobilenetv2()
+    input=torch.ones(1,3,224,224)
+    flops, params = profile(model, inputs=(input,), verbose=False)
     flops, params = clever_format([flops, params], "%.3f")
     print(flops,params)
     assert 0

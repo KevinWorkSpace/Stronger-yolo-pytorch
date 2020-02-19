@@ -71,10 +71,10 @@ def darknet53(pretrained=None, **kwargs):
 
 if __name__ == '__main__':
     from models.backbone.helper import *
+    from thop import clever_format,profile
     import os
-    ckpt=torch.load('checkpoints/strongerv2_sparse/checkpoint-best.pth')
     model = darknet53(pretrained=None)
-    inp = torch.ones((1, 3, 224, 224))
-    out = model(inp)
-    for o in out:
-        print(o.shape)
+    inp = torch.ones(1, 3, 224,224 )
+    flops,params=profile(model,(inp,))
+    flops,params=clever_format([flops,params])
+    print(flops,params)

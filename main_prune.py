@@ -7,8 +7,7 @@ from torch import optim
 import argparse
 import numpy as np
 from thop import clever_format,profile
-from pruning.l1norm import l1normPruner
-from pruning.slimming import SlimmingPruner
+from pruning import SlimmingPruner,AutoSlimPruner,l1normPruner
 from mmcv.runner import load_checkpoint
 import torch
 
@@ -25,7 +24,8 @@ def main(args):
                        lrscheduler=scheduler
                        )
 
-    pruner=SlimmingPruner(_Trainer,newmodel,cfg=args.Prune)
+    # pruner=SlimmingPruner(_Trainer,newmodel,cfg=args.Prune)
+    pruner=AutoSlimPruner(_Trainer,newmodel,cfg=args.Prune)
     # pruner=l1normPruner(_Trainer,newmodel,pruneratio=0.)
     pruner.prune()
     ##---------count op
@@ -35,6 +35,7 @@ def main(args):
     flopsnew, paramsnew = profile(newmodel, inputs=(input, ),verbose=False)
     flopsnew, paramsnew = clever_format([flopsnew, paramsnew], "%.3f")
     print("flops:{}->{}, params: {}->{}".format(flops,flopsnew,params,paramsnew))
+    assert 0
     if not args.Prune.do_test:
         resultold=pruner.test(newmodel=False,validiter=10)
         resultnew=pruner.test(newmodel=True,validiter=10)
@@ -49,7 +50,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="DEMO configuration")
     parser.add_argument(
         "--config-file",
-        default='configs/strongerv3_prune.yaml'
+        default='configs/strongerv3_US_prune.yaml'
     )
 
     parser.add_argument(

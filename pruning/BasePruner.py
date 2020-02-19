@@ -12,6 +12,11 @@ class BasePruner:
         self.blocks=[]
         self.pruneratio = 0.1
         self.args=cfg
+    def get_flops(self,model):
+        from thop import clever_format, profile
+        input = torch.randn(1, 3, 512, 512).cuda()
+        flops, params = profile(model, inputs=(input,), verbose=False)
+        return flops,params
     def prune(self):
         blocks = [None]
         name2layer = {}
@@ -42,10 +47,10 @@ class BasePruner:
                 b.inputlayer=[name2layer['headsmid.conv12']]
             if b.layername == 'headsmall.conv16':
                 b.inputlayer.append(name2layer[self.args.bbOutName[0]])
-    def test(self,newmodel=False,validiter=20):
+    def test(self,newmodel=False,validiter=20,cal_bn=False):
         if newmodel:
             self.trainer.model=self.newmodel
-        results,_=self.trainer._valid_epoch(validiter=validiter)
+        results,_=self.trainer._valid_epoch(validiter=validiter,cal_bn=cal_bn)
         self.trainer.TESTevaluator.reset()
         return results[0]
     def finetune(self,epoch=10):
@@ -64,3 +69,46 @@ class BasePruner:
                 self.best_mAP = results[0]
                 self.trainer._save_ckpt(name='best-ft{}'.format(self.pruneratio), metric=self.best_mAP)
         return self.best_mAP
+    def clone_model(self):
+        blockidx = 0
+        for name, m0 in self.newmodel.named_modules():
+            if type(m0) not in [InvertedResidual, conv_bn, nn.Linear, sepconv_bn,conv_bias,DarknetBlock]:
+                continue
+            block = self.blocks[blockidx]
+            curstatedict = block.statedict
+            if (len(block.inputlayer) == 1):
+                if block.inputlayer[0] is None:
+                    inputmask = torch.arange(block.inputchannel)
+                else:
+                    inputmask = block.inputlayer[0].outmask
+            elif (len(block.inputlayer) == 2):
+                first = block.inputlayer[0].outmask
+                second = block.inputlayer[1].outmask
+                second+=block.inputlayer[0].outputchannel
+                second=second.to(first.device)
+                inputmask=torch.cat((first,second),0)
+            else:
+                raise AttributeError
+            if isinstance(block,DarkBlock):
+                assert len(curstatedict)==(1+4+1+4)
+                block.clone2module(m0,inputmask)
+            if isinstance(block, CB):
+                # conv(1weight)->bn(4weight)->relu
+                assert len(curstatedict) == (1 + 4)
+                block.clone2module(m0, inputmask)
+            if isinstance(block, DCB):
+                # conv(1weight)->bn(4weight)->relu
+                assert len(curstatedict) == (1 + 4 + 1 + 4)
+                block.clone2module(m0, inputmask)
+            if isinstance(block, InverRes):
+
+                # dw->project or expand->dw->project
+                assert len(curstatedict) in (10, 15)
+                block.clone2module(m0, inputmask)
+            if isinstance(block, FC):
+                block.clone2module(m0)
+            if isinstance(block, Conv):
+                block.clone2module(m0,inputmask)
+
+            blockidx += 1
+            if blockidx > (len(self.blocks) - 1): break
