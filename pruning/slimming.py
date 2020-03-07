@@ -6,9 +6,9 @@ from models.backbone.baseblock import InvertedResidual, conv_bn, sepconv_bn, con
 class SlimmingPruner(BasePruner):
     def __init__(self, Trainer, newmodel, cfg,savebn=''):
         super().__init__(Trainer, newmodel,cfg)
-        self.pruneratio = cfg.pruneratio
+        self.pruneratio = cfg.Prune.pruneratio
         self.savebn=savebn
-    def prune(self):
+    def prune(self,ckpt=None):
         super().prune()
         # gather BN weights
         bns = []
@@ -20,12 +20,11 @@ class SlimmingPruner(BasePruner):
                 maxbn.append(b.bnscale.max().item())
         bns = torch.Tensor(bns)
         y, i = torch.sort(bns)
-        if self.savebn:
-            import matplotlib.pyplot as plt
-            import numpy as np
-            plt.scatter(np.arange(y.shape[0])/y.shape[0],y.numpy()/y.numpy().max())
-            plt.show()
-            assert 0
+
+
+        # import numpy as np
+        # np.save('v3bn.npy',y)
+        # assert 0
         prunelimit=(y==min(maxbn)).nonzero().item()/len(bns)
         print("prune limit: {}".format(prunelimit))
         if self.pruneratio>prunelimit:
@@ -61,5 +60,8 @@ class SlimmingPruner(BasePruner):
                 pruned_bn = pruned_bn + mask.shape[0] - torch.sum(mask)
                 b.prunemask = torch.where(mask == 1)[0]
                 print("{}:{}/{} pruned".format(b.layername, mask.shape[0] - torch.sum(mask), mask.shape[0]))
-
+        self.clone_model()
         print("Slimming Pruner done")
+    def finetune(self):
+        res=self.finetune_dist(savename='ft-{}'.format(self.pruneratio))
+        return res

@@ -28,6 +28,7 @@ MODEL:
 EXPER:
   experiment_name: 'strongerv3US'
   resume: 'best'
+  US_training: True
 DATASET:
   dataset: 'VOC'
 

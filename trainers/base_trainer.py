@@ -4,6 +4,7 @@ import os
 import time
 from dataset import makeImgPyramids
 from models.yololoss import yololoss
+from models.backbone.baseblock_US import bn_calibration_init
 from utils.nms_utils import torch_nms
 from tensorboardX import SummaryWriter
 from utils.util import AverageMeter
@@ -18,6 +19,8 @@ from utils.prune_utils import BNOptimizer
 import torch.nn as nn
 import torchvision
 import random
+from utils.dist_util import *
+from collections import OrderedDict,defaultdict
 
 class BaseTrainer:
     """
@@ -49,10 +52,11 @@ class BaseTrainer:
         self.logger_custom = None
         self.metric_evaluate = None
         self.best_mAP = 0
+        self.writer=None
         # initialize
+        self._get_dataset()
         self._get_model()
         self._get_SummaryWriter()
-        self._get_dataset()
         self._get_loggers()
         self.sparseBN = []
 
@@ -74,8 +78,19 @@ class BaseTrainer:
         if self.args.EXPER.resume == "load_voc":
             load_tf_weights(self.model, 'vocweights.pkl')
         else:  # iter or best
+            print()
             ckptfile = torch.load(os.path.join(self.save_path, 'checkpoint-{}.pth'.format(self.args.EXPER.resume)))
-            self.model.load_state_dict(ckptfile['state_dict'])
+            # take care of the distributed model
+            if 'module.' in list(self.model.state_dict().keys())[0]:
+                newdict=OrderedDict()
+                for k,v in ckptfile['state_dict'].items():
+                    if 'module.' not in k:
+                        newdict['module.'+k]=v
+                    else:
+                        newdict[k]=v
+                ckptfile['state_dict']=newdict
+            # just ignore the bn_not_save parameters
+            self.model.load_state_dict(ckptfile['state_dict'],strict=False)
             # load_checkpoint(self.model,ckptfile)
             if not self.args.finetune and not self.args.do_test and not self.args.Prune.do_test:
                 self.optimizer.load_state_dict(ckptfile['opti_dict'])
@@ -90,34 +105,12 @@ class BaseTrainer:
         self._prepare_device()
         if self.args.EXPER.resume:
             self._load_ckpt()
-
-        # #--------------------
-        # from models.strongerv3_US import StrongerV3_US_dummy
-        # newmodel = StrongerV3_US_dummy(self.args.MODEL)
-        # from collections import OrderedDict
-        # statedic = []
-        # newdic = OrderedDict()
-        # for k2, v in self.model.state_dict().items():
-        #     if 'running' in k2 or 'num_batches_tracked' in k2:
-        #         continue
-        #     statedic.append(v)
-        # print(len(statedic))
-        # names = []
-        # for k1, v1 in newmodel.state_dict().items():
-        #     if 'running' in k1 or 'num_batches_tracked' in k1:
-        #         continue
-        #     names.append(k1)
-        # newdic = OrderedDict(zip(names, statedic))
-        # newmodel.load_state_dict(newdic, strict=False)
-        # torch.save({'state_dict':newmodel.state_dict()}
-        #            , os.path.join(self.save_path,'checkpoint-trans.pth'))
-        # assert 0
     def _prepare_device(self):
         if len(self.args.devices) > 1:
             self.model = torch.nn.DataParallel(self.model)
 
     def _get_SummaryWriter(self):
-        if not self.args.debug and not self.args.do_test:
+        if not self.args.debug and not self.args.do_test and is_main_process():
             ensure_dir(os.path.join('./summary/', self.experiment_name))
 
             self.writer = SummaryWriter(log_dir='./summary/{}/{}'.format(self.experiment_name, time.strftime(
@@ -162,38 +155,48 @@ class BaseTrainer:
         for epoch in range(self.global_epoch, self.args.OPTIM.total_epoch):
             self.global_epoch += 1
             self._train_epoch()
+            torch.cuda.empty_cache()
             self.lr_scheduler.step(epoch)
             lr_current = self.optimizer.param_groups[0]['lr']
-            self.writer.add_scalar("learning_rate", lr_current, epoch)
-            for k, v in self.logger_losses.items():
-                self.writer.add_scalar(k, v.get_avg(), global_step=self.global_iter)
-            if epoch > 15:
-                results, imgs = self._valid_epoch(width_mult=1.0,cal_bn=False)
-                for k, v in zip(self.logger_custom, results):
-                    self.writer.add_scalar(k, v, global_step=self.global_epoch)
-                for i in range(len(imgs)):
-                    self.writer.add_image("detections_{}".format(i), imgs[i].transpose(2, 0, 1),
-                                          global_step=self.global_epoch)
-                self._reset_loggers()
-                if results[0] > self.best_mAP:
-                    self.best_mAP = results[0]
-                    self._save_ckpt(name='best', metric=self.best_mAP)
-            if epoch % 5 == 0:
+            if is_main_process() and self.writer is not None:
+                self.writer.add_scalar("learning_rate", lr_current, epoch)
+                for k, v in self.logger_losses.items():
+                    self.writer.add_scalar(k, v.get_avg(), global_step=self.global_iter)
+            if epoch >= self.args.EVAL.valid_epoch:
+                results, imgs = self._valid_epoch(validiter=-1,width_mult=1.0,cal_bn=True,verbose=True)
+                if is_main_process():
+                    if self.writer is not None:
+                        for k, v in zip(self.logger_custom, results):
+                            self.writer.add_scalar(k, v, global_step=self.global_epoch)
+                        for i in range(len(imgs)):
+                            self.writer.add_image("detections_{}".format(i), imgs[i].transpose(2, 0, 1),
+                                                  global_step=self.global_epoch)
+                    self._reset_loggers()
+                    if results[0] > self.best_mAP:
+                        self.best_mAP = results[0]
+                        self._save_ckpt(name=self.args.EXPER.save_ckpt, metric=self.best_mAP)
+                else:
+                    self._reset_loggers()
+            if epoch % 5 == 0 and is_main_process():
                 self._save_ckpt(metric=0)
 
     def _train_epoch(self):
+        synchronize()
         self.model.train()
         # for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
         for i, inputs in enumerate(self.train_dataloader):
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
             img, _, _, *labels = inputs
             self.global_iter += 1
-            if self.global_iter % 200 == 0:
+            if self.global_iter % 200 == 0 and is_main_process():
                 print(self.global_iter)
                 for k, v in self.logger_losses.items():
                     print(k, ":", v.get_avg())
-            # self.train_step(img, labels)
-            self.train_step_US(img, labels)
+            if self.args.EXPER.US_training:
+                self.train_step_US(img, labels)
+            else:
+                self.train_step(img, labels)
+
 
     def train_step(self, imgs, labels):
         imgs = imgs.cuda()
@@ -243,31 +246,27 @@ class BaseTrainer:
                 self.LossConf.update(conf_loss.item())
                 self.LossClass.update(probloss.item())
         self.optimizer.step()
-
+    def _cal_bn(self):
+        self.model.apply(bn_calibration_init)
+        for idx_batch, inputs in tqdm(enumerate(self.train_dataloader)):
+            if idx_batch == 100:
+                break
+            inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
+            (imgs, imgpath, ori_shapes, *_) = inputs
+            imgs = imgs.cuda()
+            with torch.no_grad():
+                self.model(imgs)
     def _valid_epoch(self, validiter=-1,width_mult=-1,cal_bn=False,verbose=False):
-        # cal_bn=True
-        # width_mult=1.0
-        def bn_calibration_init(m):
-            """ calculating post-statistics of batch normalization """
-            if getattr(m, 'track_running_stats', False):
-                m.reset_running_stats()
-                m.training = True
-        # width_mult=0.8
-        if width_mult!=-1:
-            self.model.apply(lambda m: setattr(
-                m, 'width_mult',
-                width_mult))
-        if cal_bn:
-            if width_mult not in [0.4,1.0]:
-                self.model.apply(bn_calibration_init)
-                for idx_batch, inputs in enumerate(self.train_dataloader):
-                    if idx_batch==100:
-                        break
-                    inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
-                    (imgs, imgpath, ori_shapes, *_) = inputs
-                    imgs = imgs.cuda()
-                    with torch.no_grad():
-                        self.model(imgs)
+        synchronize()
+        self.model.eval()
+        #-----------------------
+
+        if self.args.EXPER.US_training or cal_bn:
+            self.model.apply(lambda m: setattr(m, 'width_mult',width_mult))
+            if cal_bn:
+                if width_mult not in [0.4,1.0]:
+                    self._cal_bn()
+        synchronize()
         def _postprocess(pred_bbox, test_input_size, org_img_shape):
             if self.args.MODEL.boxloss == 'KL':
                 pred_coor = pred_bbox[:, 0:4]
@@ -301,10 +300,9 @@ class BaseTrainer:
             else:
                 return bboxes, None
 
-        s = time.time()
         self.model.eval()
-        # for idx_batch, inputs in tqdm(enumerate(self.test_dataloader), total=len(self.test_dataloader)):
-        for idx_batch, inputs in enumerate(self.test_dataloader):
+        for idx_batch, inputs in tqdm(enumerate(self.test_dataloader), total=len(self.test_dataloader)):
+        # for idx_batch, inputs in enumerate(self.test_dataloader):
             if idx_batch == validiter:  # to save time
                 break
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
@@ -322,9 +320,19 @@ class BaseTrainer:
                                               nms_boxes.cpu().numpy(),
                                               nms_scores.cpu().numpy(),
                                               nms_labels.cpu().numpy())
-        results = self.TESTevaluator.evaluate()
-        imgs = self.TESTevaluator.visual_imgs
-        if verbose:
-            for k, v in zip(self.logger_custom, results):
-                print("{}:{}".format(k, v))
-        return results, imgs
+        ## accumulate prediction results across gpus
+        results=all_gather(self.TESTevaluator.rec_pred)
+        if is_main_process():
+            all_recs=defaultdict(list)
+            for rec in results:
+                for k,v in rec.items():
+                    all_recs[k].extend(v)
+            self.TESTevaluator.rec_pred=all_recs
+            results = self.TESTevaluator.evaluate()
+            imgs = self.TESTevaluator.visual_imgs
+            if verbose and is_main_process():
+                for k, v in zip(self.logger_custom, results):
+                    print("{}:{}".format(k, v))
+            return results, imgs
+        else:
+            return 1,1

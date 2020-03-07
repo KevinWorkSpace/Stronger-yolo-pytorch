@@ -3,7 +3,9 @@ import torch
 from trainers.base_trainer import BaseTrainer
 from models.backbone.baseblock import InvertedResidual, conv_bn, sepconv_bn,conv_bias,DarknetBlock
 from pruning.Block import *
-
+from main_dist import main_worker
+import torch.multiprocessing as mp
+from utils.util import pick_avail_port
 class BasePruner:
     def __init__(self,trainer:BaseTrainer,newmodel,cfg):
         self.model=trainer.model
@@ -17,7 +19,7 @@ class BasePruner:
         input = torch.randn(1, 3, 512, 512).cuda()
         flops, params = profile(model, inputs=(input,), verbose=False)
         return flops,params
-    def prune(self):
+    def prune(self,ckpt=None):
         blocks = [None]
         name2layer = {}
         for midx, (name, module) in enumerate(self.model.named_modules()):
@@ -42,17 +44,26 @@ class BasePruner:
             if b.layername == 'mergelarge.conv7':
                 b.inputlayer=[name2layer['headslarge.conv4']]
             if b.layername == 'headsmid.conv8':
-                b.inputlayer.append(name2layer[self.args.bbOutName[1]])
+                b.inputlayer.append(name2layer[self.args.Prune.bbOutName[1]])
             if b.layername == 'mergemid.conv15':
                 b.inputlayer=[name2layer['headsmid.conv12']]
             if b.layername == 'headsmall.conv16':
-                b.inputlayer.append(name2layer[self.args.bbOutName[0]])
+                b.inputlayer.append(name2layer[self.args.Prune.bbOutName[0]])
     def test(self,newmodel=False,validiter=20,cal_bn=False):
         if newmodel:
             self.trainer.model=self.newmodel
         results,_=self.trainer._valid_epoch(validiter=validiter,cal_bn=cal_bn)
         self.trainer.TESTevaluator.reset()
         return results[0]
+    def test_dist(self,model,cal_bn,valid_iter=-1,ckpt=''):
+        self.args.do_test=True
+        self.args.EXPER.resume=ckpt
+        self.args.ngpu=2
+        parent_conn, child_conn = mp.Pipe()
+        avail_port=pick_avail_port()
+        # mp.spawn(main_worker,nprocs=self.args.ngpu,args=(self.args.ngpu,self.args,self.newmodel,child_conn,avail_port,cal_bn))
+        mp.spawn(main_worker,nprocs=self.args.ngpu,args=(self.args.ngpu,self.args,model,child_conn,avail_port,cal_bn,valid_iter))
+        return parent_conn.recv()[0]
     def finetune(self,epoch=10):
         self.trainer.model=self.newmodel
         # self.best_mAP=self.trainer._valid_epoch(validiter=10)[0][0]
@@ -69,6 +80,18 @@ class BasePruner:
                 self.best_mAP = results[0]
                 self.trainer._save_ckpt(name='best-ft{}'.format(self.pruneratio), metric=self.best_mAP)
         return self.best_mAP
+    def finetune_dist(self,savename='',load_last=False):
+        assert savename!=''
+        self.trainer.model=self.newmodel
+        self.best_mAP=0
+        self.args.do_test=False
+        self.args.EXPER.resume= savename if load_last else ''
+        self.args.EXPER.save_ckpt=savename
+        self.args.ngpu=2
+        parent_conn, child_conn = mp.Pipe()
+        avail_port=pick_avail_port()
+        mp.spawn(main_worker, nprocs=self.args.ngpu, args=(self.args.ngpu, self.args, self.newmodel, child_conn,avail_port))
+        return parent_conn.recv()[0]
     def clone_model(self):
         blockidx = 0
         for name, m0 in self.newmodel.named_modules():

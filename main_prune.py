@@ -10,10 +10,9 @@ from thop import clever_format,profile
 from pruning import SlimmingPruner,AutoSlimPruner,l1normPruner
 from mmcv.runner import load_checkpoint
 import torch
-
+from main_dist import main_worker
 def main(args):
-    gpus=[str(g) for g in args.devices]
-    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(gpus)
+    assert args.Prune.pruner!=''
     model = eval(cfg.MODEL.modeltype)(cfg=args.MODEL).cuda().eval()
     newmodel = eval(cfg.MODEL.modeltype)(cfg=args.MODEL).cuda().eval()
     optimizer = optim.Adam(model.parameters(),lr=args.OPTIM.lr_initial)
@@ -24,10 +23,13 @@ def main(args):
                        lrscheduler=scheduler
                        )
 
-    # pruner=SlimmingPruner(_Trainer,newmodel,cfg=args.Prune)
-    pruner=AutoSlimPruner(_Trainer,newmodel,cfg=args.Prune)
-    # pruner=l1normPruner(_Trainer,newmodel,pruneratio=0.)
-    pruner.prune()
+    # pruner=SlimmingPruner(_Trainer,newmodel,cfg=args)
+    # pruner=AutoSlimPruner(_Trainer,newmodel,cfg=args)
+    pruner=eval(args.Prune.pruner)(_Trainer,newmodel,cfg=args)
+    # pruner.prune(ckpt='logs/265.pth')
+    pruner.finetune(load_last=False,ckpt='logs/265.pth',multi_width=0.46)
+    # pruner.test(ckpt='logs/141.pth',)
+    assert 0
     ##---------count op
     input=torch.randn(1,3,512,512).cuda()
     flops, params = profile(model, inputs=(input, ),verbose=False)
@@ -35,22 +37,25 @@ def main(args):
     flopsnew, paramsnew = profile(newmodel, inputs=(input, ),verbose=False)
     flopsnew, paramsnew = clever_format([flopsnew, paramsnew], "%.3f")
     print("flops:{}->{}, params: {}->{}".format(flops,flopsnew,params,paramsnew))
-    assert 0
     if not args.Prune.do_test:
-        resultold=pruner.test(newmodel=False,validiter=10)
-        resultnew=pruner.test(newmodel=True,validiter=10)
-        print("original map:{},pruned map:{}".format(resultold,resultnew))
+        # resultold=pruner.test_dist(model=model,cal_bn=False,valid_iter=20)
+        # print("original map: {}".format(resultold))
+        # resultnew=pruner.test_dist(model=newmodel,cal_bn=False,valid_iter=20)
+        # print("pruned map:{}".format(resultnew))
         bestfinetune=pruner.finetune()
         print("finetuned map:{}".format(bestfinetune))
     else:
-        load_checkpoint(newmodel, torch.load(os.path.join(_Trainer.save_path,'checkpoint-best-ft{}.pth'.format(args.Prune.pruneratio))))
-        pruner.test(newmodel=True,validiter=-1)
+        load_checkpoint(newmodel, torch.load(os.path.join(_Trainer.save_path,'checkpoint-ft-{}.pth'.format(args.Prune.pruneratio))))
+        bestfinetune=pruner.test_dist(model=newmodel,cal_bn=False,valid_iter=-1)
+        print("finetuned map:{}".format(bestfinetune))
+
   #
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="DEMO configuration")
     parser.add_argument(
         "--config-file",
         default='configs/strongerv3_US_prune.yaml'
+        # default = 'configs/strongerv3_prune.yaml'
     )
 
     parser.add_argument(
@@ -62,5 +67,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
-    cfg.freeze()
+    # do not freeze
+    # cfg.freeze()
     main(args=cfg)

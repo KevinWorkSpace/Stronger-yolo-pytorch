@@ -35,7 +35,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--config-file",
         # default = 'configs/strongerv3_US.yaml'
-        default = 'configs/strongerv3_all.yaml'
+        default = 'configs/strongerv3_1gt.yaml'
     )
 
     parser.add_argument(

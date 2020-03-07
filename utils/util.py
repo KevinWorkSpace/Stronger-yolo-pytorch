@@ -72,3 +72,52 @@ def img_preprocess2(image, bboxes, target_shape, correct_box=True, keepratio=Tru
     bboxes[:, [1, 3]] = bboxes[:, [1, 3]] * resize_ratio + dh
     return image, bboxes
   return image
+
+
+import socket
+
+
+def get_host_ip():
+    """
+    get host ip address
+    获取本机IP地址
+
+    :return:
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    finally:
+        s.close()
+
+    return ip
+
+
+def is_port_used(ip, port):
+    """
+    check whether the port is used by other program
+    检测端口是否被占用
+
+    :param ip:
+    :param port:
+    :return:
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect((ip, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+def pick_avail_port():
+    for port in range(23450,23460):
+        if not is_port_used('127.0.0.1',port):
+            return port
+
+# 测试
+if __name__ == '__main__':
+    host_ip = get_host_ip()
+    print(host_ip)
+    print(is_port_used(host_ip, 23457))

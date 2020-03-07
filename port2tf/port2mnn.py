@@ -2,11 +2,11 @@ import os
 from utils import *
 import cv2
 import torch
-from yolov3 import YOLOV3
+from port2tf.yolov3 import YOLOV3
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 import MNN
-
+import tensorflow
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
@@ -35,7 +35,7 @@ def freeze_graph(checkpoint_path, output_node_names, savename):
         input_data = tf.placeholder(dtype=tf.float32, shape=(1, INPUTSIZE, INPUTSIZE, 3), name='input_data')
         training = tf.placeholder(dtype=tf.bool, name='training')
     prefixdict = collectpth(checkpoint_path)
-    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE)
+    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE,gt_per_grid=1)
     with tf.Session() as sess:
         output_graph_def = tf.graph_util.convert_variables_to_constants(
             sess=sess,
@@ -99,7 +99,7 @@ def mnn_test(mnn_path):
 
 
 if __name__ == '__main__':
-    INPUTSIZE = 512
+    INPUTSIZE = 320
     CLASSES = [
         "aeroplane",
         "bicycle",
@@ -122,11 +122,11 @@ if __name__ == '__main__':
         "train",
         "tvmonitor"
     ]
-    savename = 'v3prune'
+    savename = 'v3_26M'
     outnodes = "YoloV3/output/boxconcat"
-    ckptpath = 'checkpoints/strongerv3_sparse/checkpoint-best-ft0.3.pth'
+    ckptpath = 'checkpoints/strongerv3_1gt/checkpoint-best.pth'
     testimg = '004650'
     freeze_graph(checkpoint_path=ckptpath, output_node_names=outnodes, savename='port2tf/assets/%s.pb' % savename)
     pb_test('port2tf/assets/%s.pb' % savename, outnodes)
-    mnn_test('port2tf/assets/%s.mnn' % savename)
+    # mnn_test('port2tf/assets/%s.mnn' % savename)
     # onnx_test()

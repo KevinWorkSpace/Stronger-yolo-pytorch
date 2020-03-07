@@ -1,8 +1,9 @@
 import torch
 from collections import OrderedDict
 import pickle
+from utils.dist_util import *
 def load_mobilev2(model,ckpt):
-    weights = torch.load(ckpt)
+    weights = torch.load(ckpt,map_location='cuda:{}'.format(get_rank()))
     statedict=model.state_dict()
     newstatedict=OrderedDict()
     for k,v in model.state_dict().items():

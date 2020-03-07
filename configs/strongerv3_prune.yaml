@@ -33,15 +33,17 @@ DATASET:
   dataset: 'VOC'
 
 OPTIM:
-  batch_size: 12
-  lr_initial: 2e-4
+  batch_size: 8
+  lr_initial: 2e-5
   total_epoch: 3
   milestones: [1,2]
-
+EVAL:
+  score_thres: 0.2
+  valid_epoch: 0
 Prune:
   sparse: True
   pruneratio: 0.3
   bbOutName: ('backbone.features.6','backbone.features.13','backbone.features.18')
-
+  pruner: SlimmingPruner
 finetune: True
 devices: 1,

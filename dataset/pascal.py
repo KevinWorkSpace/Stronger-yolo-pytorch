@@ -10,7 +10,7 @@ import os.path as osp
 import dataset.augment.dataAug  as dataAug
 import xml.etree.ElementTree as ET
 from dataset.BaseDataset import BaseDataset
-
+from utils.dist_util import *
 class VOCdataset(BaseDataset):
     def __init__(self,cfg,subset, istrain):
         super().__init__(cfg,subset,istrain)
@@ -42,12 +42,20 @@ class VOCdataset(BaseDataset):
 def get_dataset(cfg):
     subset = [('2007', 'trainval'), ('2012', 'trainval')]
     trainset = VOCdataset(cfg, subset,istrain=True)
-    trainset = DataLoader(dataset=trainset, batch_size=1, shuffle=True, num_workers=cfg.DATASET.numworker, pin_memory=True)
+    if cfg.ngpu>1:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(trainset)
+        trainloader = DataLoader(sampler=train_sampler,dataset=trainset, batch_size=1, shuffle=False, num_workers=cfg.DATASET.numworker, pin_memory=True)
+    else:
+        trainloader = DataLoader(dataset=trainset, batch_size=1, shuffle=True, num_workers=cfg.DATASET.numworker, pin_memory=True)
 
-    subset = [('2007', 'test')]
+    subset = [('2007', cfg.DATASET.VOC_val)]
     valset = VOCdataset(cfg, subset,istrain=False)
-    valset = DataLoader(dataset=valset, batch_size=1, shuffle=False, num_workers=cfg.DATASET.numworker, pin_memory=True)
-    return trainset, valset
+    if cfg.ngpu>1:
+        val_sampler = torch.utils.data.distributed.DistributedSampler(valset)
+        valloader = DataLoader(sampler=val_sampler,dataset=valset, batch_size=1, shuffle=False, num_workers=cfg.DATASET.numworker, pin_memory=True)
+    else:
+        valloader = DataLoader(dataset=valset, batch_size=1, shuffle=False, num_workers=cfg.DATASET.numworker, pin_memory=True)
+    return trainloader, valloader
 
 
 if __name__ == '__main__':
