@@ -42,7 +42,7 @@ EVAL:
   valid_epoch: 0
 Prune:
   sparse: True
-  pruneratio: 0.3
+  pruneratio: 0.5
   bbOutName: ('backbone.features.6','backbone.features.13','backbone.features.18')
   pruner: SlimmingPruner
 finetune: True

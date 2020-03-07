@@ -7,14 +7,19 @@ See **reimplementation results** in [MODELZOO](models/MODELZOO.md).
 ## Environment
 python3.6, pytorch1.2(1.0+ should be ok), ubuntu14/16/18 tested.
 
-## Quick Start
-1 . run the following command to start training, see [yacs](https://github.com/rbgirshick/yacs) for more instructions.  
+## Quick Start (Update Distributed Train/Test 2020-3-7 )
+1 . run the following command to start training, see [yacs](https://github.com/rbgirshick/yacs) for more instructions. 
+
+~~python main.py --config-file configs/strongerv3.yaml  EXPER.experiment_name strongerv3 devices 0,~~  
 ```
-python main.py --config-file configs/strongerv3.yaml  EXPER.experiment_name strongerv3 devices 0,
+python main_dist.py --config-file configs/strongerv3.yaml  EXPER.experiment_name strongerv3 ngpu 2
 ```
 2 . run the following command to test
+
+~~python main.py --config-file configs/strongerv3.yaml EXPER.resume best  do_test True EXPER.experiment_name strongerv3 devices 0,1,~~
+
 ```
-python main.py --config-file configs/strongerv3.yaml EXPER.resume best  do_test True EXPER.experiment_name strongerv3 devices 0,1,
+python main_dist.py --config-file configs/strongerv3.yaml EXPER.resume best  do_test True EXPER.experiment_name strongerv3 ngpu 2
 ```
 
 ## Model Pruning

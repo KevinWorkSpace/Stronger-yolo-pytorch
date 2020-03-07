@@ -23,13 +23,8 @@ def main(args):
                        lrscheduler=scheduler
                        )
 
-    # pruner=SlimmingPruner(_Trainer,newmodel,cfg=args)
-    # pruner=AutoSlimPruner(_Trainer,newmodel,cfg=args)
     pruner=eval(args.Prune.pruner)(_Trainer,newmodel,cfg=args)
-    # pruner.prune(ckpt='logs/265.pth')
-    pruner.finetune(load_last=False,ckpt='logs/265.pth',multi_width=0.46)
-    # pruner.test(ckpt='logs/141.pth',)
-    assert 0
+    pruner.prune(ckpt=None)
     ##---------count op
     input=torch.randn(1,3,512,512).cuda()
     flops, params = profile(model, inputs=(input, ),verbose=False)
@@ -38,15 +33,18 @@ def main(args):
     flopsnew, paramsnew = clever_format([flopsnew, paramsnew], "%.3f")
     print("flops:{}->{}, params: {}->{}".format(flops,flopsnew,params,paramsnew))
     if not args.Prune.do_test:
-        # resultold=pruner.test_dist(model=model,cal_bn=False,valid_iter=20)
-        # print("original map: {}".format(resultold))
-        # resultnew=pruner.test_dist(model=newmodel,cal_bn=False,valid_iter=20)
-        # print("pruned map:{}".format(resultnew))
-        bestfinetune=pruner.finetune()
+        ## For AutoSlim, specify the ckpt
+        if args.Prune.pruner=='AutoSlimPruner':
+            bestfinetune= pruner.finetune(load_last=False,ckpt='logs/265.pth')
+        else:
+            bestfinetune=pruner.finetune(load_last=False)
         print("finetuned map:{}".format(bestfinetune))
     else:
-        load_checkpoint(newmodel, torch.load(os.path.join(_Trainer.save_path,'checkpoint-ft-{}.pth'.format(args.Prune.pruneratio))))
-        bestfinetune=pruner.test_dist(model=newmodel,cal_bn=False,valid_iter=-1)
+        ## For AutoSlim, specify the ckpt
+        if args.Prune.pruner=='AutoSlimPruner':
+            bestfinetune=pruner.test(ckpt='logs/265.pth',)
+        else:
+            bestfinetune=pruner.test()
         print("finetuned map:{}".format(bestfinetune))
 
   #
@@ -54,8 +52,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="DEMO configuration")
     parser.add_argument(
         "--config-file",
-        default='configs/strongerv3_US_prune.yaml'
-        # default = 'configs/strongerv3_prune.yaml'
+        # default='configs/strongerv3_US_prune.yaml'
+        default = 'configs/strongerv3_prune.yaml'
+        # default = 'configs/strongerv2_prune.yaml'
     )
 
     parser.add_argument(

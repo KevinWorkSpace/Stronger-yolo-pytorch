@@ -49,37 +49,19 @@ class BasePruner:
                 b.inputlayer=[name2layer['headsmid.conv12']]
             if b.layername == 'headsmall.conv16':
                 b.inputlayer.append(name2layer[self.args.Prune.bbOutName[0]])
-    def test(self,newmodel=False,validiter=20,cal_bn=False):
-        if newmodel:
-            self.trainer.model=self.newmodel
-        results,_=self.trainer._valid_epoch(validiter=validiter,cal_bn=cal_bn)
-        self.trainer.TESTevaluator.reset()
-        return results[0]
+    def test(self,newmodel=True,validiter=-1,cal_bn=False):
+        raise NotImplementedError
     def test_dist(self,model,cal_bn,valid_iter=-1,ckpt=''):
         self.args.do_test=True
         self.args.EXPER.resume=ckpt
-        self.args.ngpu=2
+        # self.args.ngpu=2
         parent_conn, child_conn = mp.Pipe()
         avail_port=pick_avail_port()
         # mp.spawn(main_worker,nprocs=self.args.ngpu,args=(self.args.ngpu,self.args,self.newmodel,child_conn,avail_port,cal_bn))
         mp.spawn(main_worker,nprocs=self.args.ngpu,args=(self.args.ngpu,self.args,model,child_conn,avail_port,cal_bn,valid_iter))
         return parent_conn.recv()[0]
-    def finetune(self,epoch=10):
-        self.trainer.model=self.newmodel
-        # self.best_mAP=self.trainer._valid_epoch(validiter=10)[0][0]
-        self.best_mAP=0
-        for epoch in range(0, self.trainer.args.OPTIM.total_epoch):
-            self.trainer.global_epoch += 1
-            self.trainer._train_epoch()
-            self.trainer.lr_scheduler.step(epoch)
-            lr_current = self.trainer.optimizer.param_groups[0]['lr']
-            print("epoch:{} lr:{}".format(epoch,lr_current))
-            results, imgs = self.trainer._valid_epoch()
-            self.trainer._reset_loggers()
-            if results[0] > self.best_mAP:
-                self.best_mAP = results[0]
-                self.trainer._save_ckpt(name='best-ft{}'.format(self.pruneratio), metric=self.best_mAP)
-        return self.best_mAP
+    def finetune(self,load_last,epoch=10):
+        raise NotImplementedError
     def finetune_dist(self,savename='',load_last=False):
         assert savename!=''
         self.trainer.model=self.newmodel
@@ -87,7 +69,7 @@ class BasePruner:
         self.args.do_test=False
         self.args.EXPER.resume= savename if load_last else ''
         self.args.EXPER.save_ckpt=savename
-        self.args.ngpu=2
+        # self.args.ngpu=2
         parent_conn, child_conn = mp.Pipe()
         avail_port=pick_avail_port()
         mp.spawn(main_worker, nprocs=self.args.ngpu, args=(self.args.ngpu, self.args, self.newmodel, child_conn,avail_port))

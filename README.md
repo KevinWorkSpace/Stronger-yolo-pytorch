@@ -24,14 +24,14 @@ Note:
 2.The details(e.g. channel number) of ASFF module is not completely the same as the original implementation.  
 3.The **All** version including other small tricks like removing relu in detection head. Check config file for details. 
 ## Performance on VOC2007 Test(mAP) after pruning
-|Model| Backbone|MAP | Flops(G)| Params(M)|
-| ------ | ------ | ------ | ------ |------ |
-strongerv3| Mobilev2|79.6|4.33|6.775|
-strongerv3-sparsed|Mobilev2|77.4|4.33|6.775|
-strongerv3-Pruned(30% pruned) |Mobilev2|77.1 |3.14|3.36|
-strongerv2| Darknet53|80.2|49.8|61.6|
-strongerv2-sparsed|Darknet53|78.1|49.8|61.6|
-strongerv2-Pruned(20% pruned) |Darknet53|76.8 |49.8|45.2|  
+|Model| Pruner|Backbone|mAP(before/after prune) | Flops(G)| Params(M)|
+| ------ | ------ | ------ | ------ |------ |------ |
+strongerv3|/|Mobilev2|79.6|4.33|6.775|
+strongerv3-(40% pruned)|Slimming |Mobilev2|77.4/76.9 |2.64|2.75|
+strongerv3-(pruned)|AutoSlim |Mobilev2|78.5/75.0|2.64|3.34|
+| ************* |*************|************* |*************|************* |************* |
+strongerv2| /|Darknet53|80.2|49.8|61.6|
+strongerv2-(70% pruned)|Slimming |Darknet53|78.1/77.1 |38.9|16.8|  
 
 Note:  
 1.Tuning _C.Prune.sr can get better prune ratio, I picked the official number 0.01.  
@@ -46,6 +46,12 @@ check [deploy.md](docs/deploy.md) for more details.
 - [x] MobileV2(Pruning suppoted)
 - [x] DarkNet(Pruning supported)
 ...
+
+## Supported Pruner
+- [x] [l1-norm pruner](https://arxiv.org/abs/1608.08710)
+- [x] [Slimming pruner](https://arxiv.org/abs/1708.06519)
+- [x] [AutoSlim](https://arxiv.org/abs/1903.11728) (Update 2020-3-7)
+
 ## Reference
 [Stronger-Yolo](https://github.com/Stinky-Tofu/Stronger-yolo)  
 [focal-loss](https://arxiv.org/abs/1708.02002)  

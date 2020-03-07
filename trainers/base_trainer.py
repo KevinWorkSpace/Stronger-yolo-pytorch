@@ -78,7 +78,6 @@ class BaseTrainer:
         if self.args.EXPER.resume == "load_voc":
             load_tf_weights(self.model, 'vocweights.pkl')
         else:  # iter or best
-            print()
             ckptfile = torch.load(os.path.join(self.save_path, 'checkpoint-{}.pth'.format(self.args.EXPER.resume)))
             # take care of the distributed model
             if 'module.' in list(self.model.state_dict().keys())[0]:
@@ -183,8 +182,8 @@ class BaseTrainer:
     def _train_epoch(self):
         synchronize()
         self.model.train()
-        # for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
-        for i, inputs in enumerate(self.train_dataloader):
+        for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
+        # for i, inputs in enumerate(self.train_dataloader):
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
             img, _, _, *labels = inputs
             self.global_iter += 1

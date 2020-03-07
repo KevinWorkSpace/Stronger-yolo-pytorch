@@ -8,6 +8,9 @@ class SlimmingPruner(BasePruner):
         super().__init__(Trainer, newmodel,cfg)
         self.pruneratio = cfg.Prune.pruneratio
         self.savebn=savebn
+    def test(self,newmodel=True,validiter=-1,cal_bn=False):
+        res=self.test_dist(self.newmodel,cal_bn=False,valid_iter=-1,ckpt='ft-{}'.format(self.pruneratio))
+        return res
     def prune(self,ckpt=None):
         super().prune()
         # gather BN weights
@@ -23,7 +26,7 @@ class SlimmingPruner(BasePruner):
 
 
         # import numpy as np
-        # np.save('v3bn.npy',y)
+        # np.save('v2bn.npy',y)
         # assert 0
         prunelimit=(y==min(maxbn)).nonzero().item()/len(bns)
         print("prune limit: {}".format(prunelimit))
@@ -62,6 +65,6 @@ class SlimmingPruner(BasePruner):
                 print("{}:{}/{} pruned".format(b.layername, mask.shape[0] - torch.sum(mask), mask.shape[0]))
         self.clone_model()
         print("Slimming Pruner done")
-    def finetune(self):
+    def finetune(self,load_last,epoch=10):
         res=self.finetune_dist(savename='ft-{}'.format(self.pruneratio))
         return res

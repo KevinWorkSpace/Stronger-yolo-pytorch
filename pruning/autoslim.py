@@ -24,20 +24,14 @@ class AutoSlimPruner(BasePruner):
         self.pruneratio = cfg.Prune.pruneratio
         self.prunestep = 32
         self.constrain = 2e9
-
+        self.do_test=cfg.Prune.do_test
     def finetune(self,load_last,ckpt,multi_width=-1):
         self.prune(early_ret=True)
         assert ckpt is not None
         prune_iter = int(ckpt.split('/')[1].split('.')[0])
 
         block_channels = torch.load(ckpt)
-        for idx, b in enumerate(self.blocks):
-            if block_channels[idx] is None:
-                b.prunemask = None
-            else:
-                b.prunemask = torch.arange(0, block_channels[idx]['numch'])
-
-        # #-------
+        ## use uniform prune rate or not
         if multi_width!=-1:
             prune_iter=multi_width
             for idx, b in enumerate(self.blocks):
@@ -45,6 +39,12 @@ class AutoSlimPruner(BasePruner):
                     b.prunemask = None
                 else:
                     b.prunemask = torch.arange(0, b.bnscale.shape[0]*multi_width)
+        else:
+            for idx, b in enumerate(self.blocks):
+                if block_channels[idx] is None:
+                    b.prunemask = None
+                else:
+                    b.prunemask = torch.arange(0, block_channels[idx]['numch'])
         self.clone_model()
         self.args.DATASET.VOC_val='test'
         self.args.EVAL.score_thres=0.2
@@ -59,36 +59,40 @@ class AutoSlimPruner(BasePruner):
         self.prune(early_ret=True)
         assert ckpt is not None
         prune_iter = int(ckpt.split('/')[1].split('.')[0])
-
         block_channels = torch.load(ckpt)
-        for idx, b in enumerate(self.blocks):
-            if block_channels[idx] is None:
-                b.prunemask = None
-            else:
-                b.prunemask = torch.arange(0, block_channels[idx]['numch'])
-        # #-------
-        if multi_width!=-1:
-            prune_iter=multi_width
+        if multi_width != -1:
+            prune_iter = multi_width
             for idx, b in enumerate(self.blocks):
                 if block_channels[idx] is None:
                     b.prunemask = None
                 else:
-                    b.prunemask = torch.arange(0, b.bnscale.shape[0]*multi_width)
+                    b.prunemask = torch.arange(0, b.bnscale.shape[0] * multi_width)
+        else:
+            for idx, b in enumerate(self.blocks):
+                if block_channels[idx] is None:
+                    b.prunemask = None
+                else:
+                    b.prunemask = torch.arange(0, block_channels[idx]['numch'])
         # #-------
-        # for idx, b in enumerate(self.blocks):
-        #     if block_channels[idx] is None:
-        #         b.prunemask = None
-        #     else:
-        #         b.prunemask = torch.arange(0, b.bnscale.shape[0]*0.7)
+
         self.clone_model()
         self.args.DATASET.VOC_val='test'
         self.args.EVAL.score_thres=0.2
         res=self.test_dist(self.newmodel,cal_bn=True,valid_iter=-1,ckpt='USprune-{}'.format(prune_iter))
         print(res)
     def get_prunestep(self, numch: int):
+        """ TO accelerate pruning phase
+        :param numch: channel number for current layer
+        :return: int
+        """
         return max(int(numch * 0.1), 12)
 
     def prune(self, ckpt=None,early_ret=False):
+        """
+        :param ckpt: continue pruning with ckpt,since the search phase is slow
+        :param early_ret: build the Model for other APIs
+        :return: None
+        """
         blocks = [None]
         name2layer = {}
         ## US model has a different architecture
@@ -118,7 +122,7 @@ class AutoSlimPruner(BasePruner):
             if b.layername == 'mergemid.conv15':
                 b.inputlayer = [name2layer['headsmid.conv12']]
                 b.bnscale = None
-        if early_ret:
+        if early_ret or self.do_test:
             return
         block_channels = OrderedDict()
         for idx, b in enumerate(self.blocks):
