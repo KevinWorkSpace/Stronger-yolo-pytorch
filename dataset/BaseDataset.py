@@ -2,24 +2,6 @@ import numpy as np
 import random
 import torch
 import torch.utils.data as data
-from utils.structures.bounding_box import BoxList
-
-
-class BatchCollator(object):
-    """
-    From a list of samples from the dataset,
-    returns the batched images and targets.
-    This should be passed to the DataLoader
-    """
-
-    def __init__(self, size_divisible=0):
-        self.size_divisible = size_divisible
-
-    def __call__(self, batch):
-        print(type(batch))
-        print("*******************")
-        return batch[0], batch[1]
-
 
 class BaseDataset(data.Dataset):
     def __init__(self, cfg, subset, istrain):

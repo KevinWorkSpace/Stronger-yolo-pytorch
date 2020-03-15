@@ -35,8 +35,8 @@ DATASET:
 OPTIM:
   batch_size: 12
   lr_initial: 3e-4
-  total_epoch: 40
-  milestones: [25,35]
+  total_epoch: 50
+  milestones: [30,40]
 
 Prune:
   sparse: False
