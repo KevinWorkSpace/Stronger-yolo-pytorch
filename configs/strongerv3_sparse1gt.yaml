@@ -1,0 +1,47 @@
+MODEL:
+  LABEL: [
+  "aeroplane",
+  "bicycle",
+  "bird",
+  "boat",
+  "bottle",
+  "bus",
+  "car",
+  "cat",
+  "chair",
+  "cow",
+  "diningtable",
+  "dog",
+  "horse",
+  "motorbike",
+  "person",
+  "pottedplant",
+  "sheep",
+  "sofa",
+  "train",
+  "tvmonitor"
+  ]
+  numcls: 20
+  modeltype: StrongerV3_new
+  backbone: 'mobilenetv2'
+  backbone_pretrained: 'checkpoints/mobilenet_v2.pth'
+  gt_per_grid: 1
+
+EXPER:
+  experiment_name: 'strongerv3_sparse1gt'
+#  resume: 'best'
+DATASET:
+  dataset: 'VOC'
+
+OPTIM:
+  batch_size: 12
+  lr_initial: 2e-4
+  total_epoch: 60
+  milestones: [30,45]
+
+Prune:
+  sparse: True
+  sr: 0.005
+  pruneratio: 0.5
+  bbOutName: ('backbone.features.6','backbone.features.13','backbone.features.18')
+  pruner: SlimmingPruner
