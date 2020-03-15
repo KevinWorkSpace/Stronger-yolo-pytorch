@@ -9,3 +9,5 @@ weights/
 transfer.py
 local.py
 *.pb
+*.jpg
+port2tf/assets
