@@ -385,28 +385,26 @@ def decode_validate(name, conv_output, num_classes, stride, shape, gt_pergrid):
     confidence是预测bbox属于物体的概率，probability是条件概率分布
     """
     with tf.variable_scope(name):
-        conv_output = tf.reshape(conv_output, (shape, shape,gt_pergrid, 5 + num_classes))
-        conv_raw_dx1dy1, conv_raw_dx2dy2, conv_raw_conf, conv_raw_prob = tf.split(conv_output, [2, 2, 1, num_classes],axis=3)
+        conv_output = tf.reshape(conv_output, (shape, shape, 3, 5 + num_classes))
+        conv_raw_dx1dy1, conv_raw_dx2dy2, conv_raw_conf, conv_raw_prob = tf.split(conv_output, [2, 2, 1, num_classes],
+                                                                                  axis=3)
 
-        import numpy as np
-        y=np.tile(np.expand_dims(np.arange(shape),1),[1,shape])
-        x=np.tile(np.expand_dims(np.arange(shape),0),[shape,1])
-        xy_grid=np.stack([x,y],2)
-        xy_grid=np.expand_dims(xy_grid,0).astype(np.float32)
-        xy_grid=tf.constant(xy_grid,dtype=tf.float32)
-
-        # y = tf.tile(tf.expand_dims(tf.range(shape, dtype=tf.int32), 1), [1, shape])
-        # x = tf.tile(tf.expand_dims(tf.range(shape, dtype=tf.int32), 0), [shape, 1])
-        # xy_grid = tf.stack([x, y], axis=2)
+        # y = tf.tile(tf.range(shape, dtype=tf.int32)[:, tf.newaxis], [1, shape])
+        y = tf.tile(tf.expand_dims(tf.range(shape, dtype=tf.int32), 1), [1, shape])
+        x = tf.tile(tf.expand_dims(tf.range(shape, dtype=tf.int32), 0), [shape, 1])
+        xy_grid = tf.stack([x, y], axis=2)
         # xy_grid = tf.expand_dims(xy_grid, 0)
-        # xy_grid = tf.cast(xy_grid, tf.float32)
-        # assert 0
+        xy_grid = tf.expand_dims(xy_grid, 2)
+        xy_grid = tf.tile(xy_grid, [1, 1, 3, 1])
+        xy_grid = tf.cast(xy_grid, tf.float32)
         pred_xymin = (xy_grid + 0.5 - tf.exp(conv_raw_dx1dy1)) * stride
         pred_xymax = (xy_grid + 0.5 + tf.exp(conv_raw_dx2dy2)) * stride
         pred_corner = tf.concat([pred_xymin, pred_xymax], axis=-1)
         # (2)对confidence进行decode
         pred_conf = tf.sigmoid(conv_raw_conf)
+
         # (3)对probability进行decode
         pred_prob = tf.sigmoid(conv_raw_prob)
+
         pred_bbox = tf.concat([pred_corner, pred_conf, pred_prob], axis=-1)
         return pred_bbox

@@ -1,7 +1,6 @@
 from models.backbone import *
 from models.backbone.helper import *
 from models.backbone.baseblock import *
-from core.assigners.areayolo_assigner import AreaAssigner
 from functools import partial
 import utils.GIOU as GIOUloss
 from models.BaseModel import BaseModel

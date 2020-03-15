@@ -3,7 +3,8 @@
 ## Introduction
 This project is inspired by [Stronger-Yolo](https://github.com/Stinky-Tofu/Stronger-yolo). I reimplemented with Pytorch and continue improving yolov3 with latest papers.  
 This project will also try out some model-compression approaches(e.g. channel-pruning).  
-See **reimplementation results** in [MODELZOO](docs/MODELZOO.md).
+See **reimplementation results** in [MODELZOO](docs/MODELZOO.md).  
+See **Changelog** in [更新日志](docs/changelog.md)
 ## Environment
 python3.6, pytorch1.2(1.0+ should be ok), ubuntu14/16/18 tested.
 
