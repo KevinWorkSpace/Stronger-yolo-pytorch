@@ -385,7 +385,7 @@ def decode_validate(name, conv_output, num_classes, stride, shape, gt_pergrid):
     confidence是预测bbox属于物体的概率，probability是条件概率分布
     """
     with tf.variable_scope(name):
-        conv_output = tf.reshape(conv_output, (1, shape, shape, 5 + num_classes))
+        conv_output = tf.reshape(conv_output, (shape, shape,gt_pergrid, 5 + num_classes))
         conv_raw_dx1dy1, conv_raw_dx2dy2, conv_raw_conf, conv_raw_prob = tf.split(conv_output, [2, 2, 1, num_classes],axis=3)
 
         import numpy as np

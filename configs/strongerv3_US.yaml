@@ -27,7 +27,7 @@ MODEL:
   backbone_pretrained: 'checkpoints/mobilenet_v2.pth'
 EXPER:
   experiment_name: 'strongerv3US'
-  resume: 'best'
+#  resume: 'best'
   US_training: True
 DATASET:
   dataset: 'VOC'

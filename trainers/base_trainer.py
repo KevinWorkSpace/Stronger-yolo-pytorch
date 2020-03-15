@@ -3,7 +3,6 @@ from dataset import get_COCO, get_VOC
 import os
 import time
 from dataset import makeImgPyramids
-from models.yololoss import yololoss
 from models.backbone.baseblock_US import bn_calibration_init
 from utils.nms_utils import torch_nms
 from tensorboardX import SummaryWriter
@@ -20,7 +19,8 @@ import torch.nn as nn
 import torchvision
 import random
 from utils.dist_util import *
-from collections import OrderedDict,defaultdict
+from collections import OrderedDict, defaultdict
+
 
 class BaseTrainer:
     """
@@ -52,7 +52,7 @@ class BaseTrainer:
         self.logger_custom = None
         self.metric_evaluate = None
         self.best_mAP = 0
-        self.writer=None
+        self.writer = None
         # initialize
         self._get_dataset()
         self._get_model()
@@ -81,15 +81,23 @@ class BaseTrainer:
             ckptfile = torch.load(os.path.join(self.save_path, 'checkpoint-{}.pth'.format(self.args.EXPER.resume)))
             # take care of the distributed model
             if 'module.' in list(self.model.state_dict().keys())[0]:
-                newdict=OrderedDict()
-                for k,v in ckptfile['state_dict'].items():
+                newdict = OrderedDict()
+                for k, v in ckptfile['state_dict'].items():
                     if 'module.' not in k:
-                        newdict['module.'+k]=v
+                        newdict['module.' + k] = v
                     else:
-                        newdict[k]=v
-                ckptfile['state_dict']=newdict
+                        newdict[k] = v
+                ckptfile['state_dict'] = newdict
+            else:
+                newdict = OrderedDict()
+                for k, v in ckptfile['state_dict'].items():
+                    if 'module.' in k:
+                        newdict[k[7:]] = v
+                    else:
+                        newdict[k] = v
+                ckptfile['state_dict'] = newdict
             # just ignore the bn_not_save parameters
-            self.model.load_state_dict(ckptfile['state_dict'],strict=False)
+            self.model.load_state_dict(ckptfile['state_dict'], strict=False)
             # load_checkpoint(self.model,ckptfile)
             if not self.args.finetune and not self.args.do_test and not self.args.Prune.do_test:
                 self.optimizer.load_state_dict(ckptfile['opti_dict'])
@@ -104,9 +112,12 @@ class BaseTrainer:
         self._prepare_device()
         if self.args.EXPER.resume:
             self._load_ckpt()
+
     def _prepare_device(self):
-        if len(self.args.devices) > 1:
-            self.model = torch.nn.DataParallel(self.model)
+        pass
+        # deprecated
+        # if len(self.args.devices) > 1:
+        #     self.model = torch.nn.DataParallel(self.model)
 
     def _get_SummaryWriter(self):
         if not self.args.debug and not self.args.do_test and is_main_process():
@@ -162,7 +173,7 @@ class BaseTrainer:
                 for k, v in self.logger_losses.items():
                     self.writer.add_scalar(k, v.get_avg(), global_step=self.global_iter)
             if epoch >= self.args.EVAL.valid_epoch:
-                results, imgs = self._valid_epoch(validiter=-1,width_mult=1.0,cal_bn=True,verbose=True)
+                results, imgs = self._valid_epoch(validiter=-1, width_mult=1.0, cal_bn=False, verbose=True)
                 if is_main_process():
                     if self.writer is not None:
                         for k, v in zip(self.logger_custom, results):
@@ -182,69 +193,82 @@ class BaseTrainer:
     def _train_epoch(self):
         synchronize()
         self.model.train()
-        for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
-        # for i, inputs in enumerate(self.train_dataloader):
+        # for i, inputs in tqdm(enumerate(self.train_dataloader), total=len(self.train_dataloader)):
+        for i, inputs in enumerate(self.train_dataloader):
             inputs = [input if isinstance(input, list) else input.squeeze(0) for input in inputs]
-            img, _, _, *labels = inputs
+            img, _, _, gtbox = inputs
+            # img, _, _, *gtbox = inputs
+
+            gtbox = [g.squeeze(0) for g in gtbox]
             self.global_iter += 1
-            if self.global_iter % 200 == 0 and is_main_process():
+
+            if self.global_iter % 50 == 0 and is_main_process():
                 print(self.global_iter)
                 for k, v in self.logger_losses.items():
                     print(k, ":", v.get_avg())
             if self.args.EXPER.US_training:
-                self.train_step_US(img, labels)
+                self.train_step_US(img, gtbox)
             else:
-                self.train_step(img, labels)
+                self.train_step(img, gtbox)
 
-
-    def train_step(self, imgs, labels):
+    def train_step(self, imgs, gtbox):
         imgs = imgs.cuda()
-        labels = [label.cuda() for label in labels]
-        label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
-        outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
-        GIOUloss, conf_loss, probloss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
-                                                 predlarge,
-                                                 label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
-        GIOUloss = GIOUloss.sum() / imgs.shape[0]
+        gtbox=[g.cuda() for g in gtbox]
+        bbox_loss, conf_loss, prob_loss = self.model(imgs,gtbox)
+        bbox_loss = bbox_loss.sum() / imgs.shape[0]
         conf_loss = conf_loss.sum() / imgs.shape[0]
-        probloss = probloss.sum() / imgs.shape[0]
-
-        totalloss = GIOUloss + conf_loss + probloss
+        prob_loss = prob_loss.sum() / imgs.shape[0]
+        totalloss = bbox_loss + conf_loss + prob_loss
+        # imgs = imgs.cuda()
+        # labels = [label.cuda() for label in gtbox]
+        # label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
+        # outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
+        # bbox_loss, conf_loss, prob_loss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
+        #                                          predlarge,
+        #                                          label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
+        #
+        # bbox_loss = bbox_loss.sum() / imgs.shape[0]
+        # conf_loss = conf_loss.sum() / imgs.shape[0]
+        # prob_loss = prob_loss.sum() / imgs.shape[0]
+        # totalloss = bbox_loss + conf_loss + prob_loss
+        # print(conf_loss.sum(),prob_loss.sum(),bbox_loss.sum())
+        # print(totalloss.sum())
+        # assert 0
         self.optimizer.zero_grad()
         totalloss.backward()
         if self.args.Prune.sparse:
             self.updateBN()
         self.optimizer.step()
-        self.LossBox.update(GIOUloss.item())
+        self.LossBox.update(bbox_loss.item())
         self.LossConf.update(conf_loss.item())
-        self.LossClass.update(probloss.item())
-    def train_step_US(self, imgs, labels):
+        self.LossClass.update(prob_loss.item())
+
+    def train_step_US(self, imgs, gtbox):
         imgs = imgs.cuda()
-        labels = [label.cuda() for label in labels]
-        label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
+        gtbox=[g.cuda() for g in gtbox]
+
         self.optimizer.zero_grad()
         widths_train = []
         for _ in range(4 - 2):
             widths_train.append(
                 random.uniform(0.4, 1.0))
-            widths_train = [1.0,0.4] + widths_train
-        for idx,width_mult in enumerate(widths_train):
-            self.model.apply(lambda m: setattr(m, 'width_mult',width_mult))
-            outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
-            GIOUloss, conf_loss, probloss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
-                                                     predlarge,
-                                                     label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
-            GIOUloss = GIOUloss.sum() / imgs.shape[0]
-            conf_loss = conf_loss.sum() / imgs.shape[0]
-            probloss = probloss.sum() / imgs.shape[0]
+            widths_train = [1.0, 0.4] + widths_train
+        for idx, width_mult in enumerate(widths_train):
+            self.model.apply(lambda m: setattr(m, 'width_mult', width_mult))
+            bbox_loss, conf_loss, prob_loss = self.model(imgs, gtbox)
 
-            totalloss = GIOUloss + conf_loss + probloss
+            bbox_loss = bbox_loss.sum() / imgs.shape[0]
+            conf_loss = conf_loss.sum() / imgs.shape[0]
+            prob_loss = prob_loss.sum() / imgs.shape[0]
+
+            totalloss = bbox_loss + conf_loss + prob_loss
             totalloss.backward()
-            if idx==0:
-                self.LossBox.update(GIOUloss.item())
+            if idx == 0:
+                self.LossBox.update(bbox_loss.item())
                 self.LossConf.update(conf_loss.item())
-                self.LossClass.update(probloss.item())
+                self.LossClass.update(prob_loss.item())
         self.optimizer.step()
+
     def _cal_bn(self):
         self.model.apply(bn_calibration_init)
         for idx_batch, inputs in tqdm(enumerate(self.train_dataloader)):
@@ -255,17 +279,19 @@ class BaseTrainer:
             imgs = imgs.cuda()
             with torch.no_grad():
                 self.model(imgs)
-    def _valid_epoch(self, validiter=-1,width_mult=-1,cal_bn=False,verbose=False):
+
+    def _valid_epoch(self, validiter=-1, width_mult=-1, cal_bn=False, verbose=False):
         synchronize()
         self.model.eval()
-        #-----------------------
+        # -----------------------
 
         if self.args.EXPER.US_training or cal_bn:
-            self.model.apply(lambda m: setattr(m, 'width_mult',width_mult))
+            self.model.apply(lambda m: setattr(m, 'width_mult', width_mult))
             if cal_bn:
-                if width_mult not in [0.4,1.0]:
+                if width_mult not in [0.4, 1.0]:
                     self._cal_bn()
         synchronize()
+
         def _postprocess(pred_bbox, test_input_size, org_img_shape):
             if self.args.MODEL.boxloss == 'KL':
                 pred_coor = pred_bbox[:, 0:4]
@@ -320,13 +346,13 @@ class BaseTrainer:
                                               nms_scores.cpu().numpy(),
                                               nms_labels.cpu().numpy())
         ## accumulate prediction results across gpus
-        results=all_gather(self.TESTevaluator.rec_pred)
+        results = all_gather(self.TESTevaluator.rec_pred)
         if is_main_process():
-            all_recs=defaultdict(list)
+            all_recs = defaultdict(list)
             for rec in results:
-                for k,v in rec.items():
+                for k, v in rec.items():
                     all_recs[k].extend(v)
-            self.TESTevaluator.rec_pred=all_recs
+            self.TESTevaluator.rec_pred = all_recs
             results = self.TESTevaluator.evaluate()
             imgs = self.TESTevaluator.visual_imgs
             if verbose and is_main_process():
@@ -334,4 +360,4 @@ class BaseTrainer:
                     print("{}:{}".format(k, v))
             return results, imgs
         else:
-            return 1,1
+            return 1, 1

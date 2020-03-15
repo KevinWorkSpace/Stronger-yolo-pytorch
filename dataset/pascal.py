@@ -62,6 +62,7 @@ if __name__ == '__main__':
     from yacscfg import _C as cfg
     import os
     import argparse
+    from tqdm import tqdm
     parser = argparse.ArgumentParser(description="DEMO configuration")
     parser.add_argument(
         "--config-file",
@@ -78,9 +79,24 @@ if __name__ == '__main__':
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
     cfg.EVAL.iou_thres = 0.5
-    cfg.DATASET.dataset_root='/disk3/datasets/VOCdevkit'
+    cfg.DATASET.numworker=1
     cfg.freeze()
     train,val=get_dataset(cfg)
-    for data in train:
-        print(len(train))
+    obj_s=0
+    obj_m=0
+    obj_l=0
+    for data in tqdm(val,total=len(val)):
+        img, _, _, *labels = data
+        label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
+        # 1, 8, 60, 60, 3, 26
+        respond_bboxs = label_sbbox[..., 4:5]
+        respond_bboxm = label_mbbox[..., 4:5]
+        respond_bboxl = label_lbbox[..., 4:5]
+        obj_s+=respond_bboxs.sum()
+        obj_m+=respond_bboxm.sum()
+        obj_l+=respond_bboxl.sum()
+        print(obj_s,obj_m,obj_l)
         assert 0
+    # tensor(7467.) tensor(49050.) tensor(121950.)
+    #tensor(33498.) tensor(40485.) tensor(103233.)
+    print(obj_s,obj_m,obj_l)

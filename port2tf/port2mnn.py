@@ -18,6 +18,8 @@ def collectpth(checkpoint_path):
         if 'num_batches_tracked' in k:
             continue
         # delete the prefix for backbone
+        if 'module.' in k:
+            k = k[7:]
         if 'mobilev2' in k:
             k = k.strip('mobilev2.')
         if 'backbone' in k:
@@ -35,7 +37,7 @@ def freeze_graph(checkpoint_path, output_node_names, savename):
         input_data = tf.placeholder(dtype=tf.float32, shape=(1, INPUTSIZE, INPUTSIZE, 3), name='input_data')
         training = tf.placeholder(dtype=tf.bool, name='training')
     prefixdict = collectpth(checkpoint_path)
-    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE,gt_per_grid=1)
+    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE,gt_per_grid=3)
     with tf.Session() as sess:
         output_graph_def = tf.graph_util.convert_variables_to_constants(
             sess=sess,
@@ -122,9 +124,9 @@ if __name__ == '__main__':
         "train",
         "tvmonitor"
     ]
-    savename = 'v3_26M'
+    savename = 'v3_prune'
     outnodes = "YoloV3/output/boxconcat"
-    ckptpath = 'checkpoints/strongerv3_1gt/checkpoint-best.pth'
+    ckptpath = 'checkpoints/strongerv3_sparse/checkpoint-ft-0.5.pth'
     testimg = '004650'
     freeze_graph(checkpoint_path=ckptpath, output_node_names=outnodes, savename='port2tf/assets/%s.pb' % savename)
     pb_test('port2tf/assets/%s.pb' % savename, outnodes)

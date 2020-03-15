@@ -2,16 +2,12 @@ from models.backbone import *
 from models.backbone.helper import *
 from models.backbone.baseblock_US import *
 from models.backbone.baseblock import *
+from models.BaseModel import BaseModel
+import utils.GIOU as GIOUloss
 
-class StrongerV3_US(nn.Module):
+class StrongerV3_US(BaseModel):
     def __init__(self, cfg):
-        super().__init__()
-        self.cfg = cfg
-        self.numclass = cfg.numcls
-        self.gt_per_grid = cfg.gt_per_grid
-        self.backbone = eval(cfg.backbone)(pretrained=cfg.backbone_pretrained)
-        self.outC = self.backbone.backbone_outchannels
-        self.heads = []
+        super().__init__(cfg)
         self.activate_type = 'relu6'
         self.headslarge = nn.Sequential(OrderedDict([
             ('conv0',USconv_bn(self.outC[0], 512, kernel=1, stride=1, padding=0)),
@@ -64,97 +60,99 @@ class StrongerV3_US(nn.Module):
             self.ASFF_US1 = ASFF_US(1, activate=self.activate_type)
             self.ASFF_US2 = ASFF_US(2, activate=self.activate_type)
         self.apply(lambda m: setattr(m, 'width_mult',1.0))
-
-    def decode(self, output, stride):
-        bz = output.shape[0]
-        gridsize = output.shape[-1]
-
-        output = output.permute(0, 2, 3, 1)
-        output = output.view(bz, gridsize, gridsize, self.gt_per_grid, 5 + self.numclass)
-        x1y1, x2y2, conf, prob = torch.split(output, [2, 2, 1, self.numclass], dim=4)
-        shiftx = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty, shiftx = torch.meshgrid([shiftx, shifty])
-        shiftx = shiftx.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-        shifty = shifty.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-
-        xy_grid = torch.stack([shiftx, shifty], dim=4).cuda()
-        x1y1 = (xy_grid + 0.5 - torch.exp(x1y1)) * stride
-        x2y2 = (xy_grid + 0.5 + torch.exp(x2y2)) * stride
-
-        xyxy = torch.cat((x1y1, x2y2), dim=4)
-        conf = torch.sigmoid(conf)
-        prob = torch.sigmoid(prob)
-        output = torch.cat((xyxy, conf, prob), 4)
-        return output
-
-    def decode_infer(self, output, stride):
-        bz = output.shape[0]
-        gridsize = output.shape[-1]
-
-        output = output.permute(0, 2, 3, 1)
-        output = output.view(bz, gridsize, gridsize, self.gt_per_grid, 5 + self.numclass)
-        x1y1, x2y2, conf, prob = torch.split(output, [2, 2, 1, self.numclass], dim=4)
-
-        shiftx = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty, shiftx = torch.meshgrid([shiftx, shifty])
-        shiftx = shiftx.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-        shifty = shifty.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-
-        xy_grid = torch.stack([shiftx, shifty], dim=4).cuda()
-        x1y1 = (xy_grid + 0.5 - torch.exp(x1y1)) * stride
-        x2y2 = (xy_grid + 0.5 + torch.exp(x2y2)) * stride
-
-        xyxy = torch.cat((x1y1, x2y2), dim=4)
-        conf = torch.sigmoid(conf)
-        prob = torch.sigmoid(prob)
-        output = torch.cat((xyxy, conf, prob), 4)
-        output = output.view(bz, -1, 5 + self.numclass)
-        return output
-
-    def forward(self, input):
+    def forward(self, input, targets=None):
+        self.input_size = input.shape[-1]
         feat_small, feat_mid, feat_large = self.backbone(input)
         conv = self.headslarge(feat_large)
         convlarge = conv
 
         conv = self.mergelarge(convlarge)
-        # conv = self.headsmid(torch.cat((conv, feat_mid), dim=1))
         conv = self.headsmid(conv+feat_mid)
         convmid = conv
 
         conv = self.mergemid(convmid)
-        # conv = self.headsmall(torch.cat((conv, feat_small), dim=1))
         conv = self.headsmall(conv+feat_small)
         convsmall = conv
         if self.cfg.ASFF:
-            convlarge = self.ASFF_US0(convlarge, convmid, convsmall)
-            convmid = self.ASFF_US1(convlarge, convmid, convsmall)
-            convsmall = self.ASFF_US2(convlarge, convmid, convsmall)
+            convlarge = self.asff0(convlarge, convmid, convsmall)
+            convmid = self.asff1(convlarge, convmid, convsmall)
+            convsmall = self.asff2(convlarge, convmid, convsmall)
         outlarge = self.detlarge(convlarge)
         outmid = self.detmid(convmid)
         outsmall = self.detsmall(convsmall)
         if self.training:
+            assert targets is not None
             predlarge = self.decode(outlarge, 32)
             predmid = self.decode(outmid, 16)
             predsmall = self.decode(outsmall, 8)
+            return self.loss([predsmall, predmid, predlarge], targets)
         else:
             predlarge = self.decode_infer(outlarge, 32)
             predmid = self.decode_infer(outmid, 16)
             predsmall = self.decode_infer(outsmall, 8)
             pred = torch.cat([predsmall, predmid, predlarge], dim=1)
             return pred
-        return outsmall, outmid, outlarge, predsmall, predmid, predlarge
 
-class StrongerV3_US_dummy(nn.Module):
+    def build_target(self, bboxs: list, preds):
+        # get target for each image
+        batch_targets = []
+        batch_preds = []
+        for idx_img in range(preds[0].shape[0]):
+            batch_preds.append(torch.cat([p[idx_img] for p in preds], 0))
+        for bbox, pred in zip(bboxs, batch_preds):
+            batch_targets.append(self.yolo_target_single(bbox, pred))
+        batch_targets = torch.stack(batch_targets, 0)
+        return batch_targets
+
+    def yolo_target_single(self, target: torch.Tensor, pred: torch.Tensor):
+
+        bbox, class_label, mix_weight = target.split([4, 1, 1], dim=1)
+        class_label = class_label.long()
+        reg_area_limit = [0, 30, 90, 10000]
+        strides = [8, 16, 32]
+        target_lvl = [torch.zeros(self.input_size // strides[i], self.input_size // strides[i], self.gt_per_grid,
+                                  6 + self.numclass).cuda() for i in range(3)]
+        target_count = [torch.zeros(self.input_size // strides[i], self.input_size // strides[i]).long() for i in
+                        range(3)]
+        bbox_xywh = torch.cat([(bbox[:, 2:] + bbox[:, :2]) * 0.5,
+                               bbox[:, 2:] - bbox[:, :2]], dim=-1)
+        bboxarea = torch.sqrt(bbox_xywh[:, -2] * bbox_xywh[:, -1])
+        for i in range(3):
+            # initialize box weight 1
+            target_lvl[i][:, :, :, 5] = 1.0
+            valid_mask = (bboxarea > reg_area_limit[i]) & (bboxarea < reg_area_limit[i + 1])
+            for gt_xywh, class_index, gt_xyxy, box_weight in zip(bbox_xywh[valid_mask], class_label[valid_mask],
+                                                                 bbox[valid_mask], mix_weight[valid_mask]):
+                gt_xywh = (gt_xywh / strides[i]).long()
+                numgt = target_count[i][gt_xywh[1]][gt_xywh[0]]
+                delta = 0.01
+                if numgt==0 and self.gt_per_grid>1:
+                    for n in range(self.gt_per_grid):
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][:4] = gt_xyxy
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][4] = 1.0
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][5] = box_weight
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][6:] = 1.0 / self.numclass * delta
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][6 + class_index] = (1.0 - delta) + 1.0 / self.numclass * delta
+                else:
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][:4] = gt_xyxy
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][4] = 1.0
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][5] = box_weight
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][6:] = 1.0 / self.numclass * delta
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][6 + class_index] = (1.0 - delta) + 1.0 / self.numclass * delta
+                target_count[i][gt_xywh[1]][gt_xywh[0]] = min(self.gt_per_grid - 1,target_count[i][gt_xywh[1]][gt_xywh[0]] + 1)
+        target_lvl = [t.view(-1, 6 + self.numclass) for t in target_lvl]
+        target_lvl = torch.cat(target_lvl, 0)
+        iou = GIOUloss.bbox_overlaps(pred[:, :4], target[:, :4])
+        max_iou, _ = torch.max(iou, dim=-1)
+        max_iou = max_iou.unsqueeze(-1)
+        respond_bgd = (torch.ones_like(target_lvl[:, 4:5]) - target_lvl[:, 4:5]) * (max_iou < 0.5).float()
+        # respond_bgd = (torch.ones_like(target_lvl[:,4:5])- target_lvl[:,4:5])
+        target_lvl = torch.cat([target_lvl, respond_bgd], -1)
+        return target_lvl
+
+class StrongerV3_US_dummy(BaseModel):
     def __init__(self,cfg):
-        super().__init__()
-        self.cfg=cfg
-        self.numclass=cfg.numcls
-        self.gt_per_grid=cfg.gt_per_grid
-        self.backbone = mobilenetv2(pretrained=cfg.backbone_pretrained)
-        self.outC = self.backbone.backbone_outchannels
-        self.heads=[]
+        super().__init__(cfg)
         self.activate_type = 'relu6'
         self.headslarge=nn.Sequential(OrderedDict([
             ('conv0',conv_bn(self.outC[0],512,kernel=1,stride=1,padding=0)),
@@ -203,61 +201,13 @@ class StrongerV3_US_dummy(nn.Module):
             self.asff0 = ASFF(0, activate=self.activate_type)
             self.asff1 = ASFF(1, activate=self.activate_type)
             self.asff2 = ASFF(2, activate=self.activate_type)
-
-    def decode(self, output, stride):
-        bz = output.shape[0]
-        gridsize = output.shape[-1]
-
-        output = output.permute(0, 2, 3, 1)
-        output = output.view(bz, gridsize, gridsize, self.gt_per_grid, 5 + self.numclass)
-        x1y1, x2y2, conf, prob = torch.split(output, [2, 2, 1, self.numclass], dim=4)
-        shiftx = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty, shiftx = torch.meshgrid([shiftx, shifty])
-        shiftx = shiftx.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-        shifty = shifty.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-
-        xy_grid = torch.stack([shiftx, shifty], dim=4).cuda()
-        x1y1 = (xy_grid + 0.5 - torch.exp(x1y1)) * stride
-        x2y2 = (xy_grid + 0.5 + torch.exp(x2y2)) * stride
-
-        xyxy = torch.cat((x1y1, x2y2), dim=4)
-        conf = torch.sigmoid(conf)
-        prob = torch.sigmoid(prob)
-        output = torch.cat((xyxy, conf, prob), 4)
-        return output
-
-    def decode_infer(self, output, stride):
-        bz = output.shape[0]
-        gridsize = output.shape[-1]
-
-        output = output.permute(0, 2, 3, 1)
-        output = output.view(bz, gridsize, gridsize, self.gt_per_grid, 5 + self.numclass)
-        x1y1, x2y2, conf, prob = torch.split(output, [2, 2, 1, self.numclass], dim=4)
-
-        shiftx = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty = torch.arange(0, gridsize, dtype=torch.float32)
-        shifty, shiftx = torch.meshgrid([shiftx, shifty])
-        shiftx = shiftx.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-        shifty = shifty.unsqueeze(-1).repeat(bz, 1, 1, self.gt_per_grid)
-
-        xy_grid = torch.stack([shiftx, shifty], dim=4).cuda()
-        x1y1 = (xy_grid + 0.5 - torch.exp(x1y1)) * stride
-        x2y2 = (xy_grid + 0.5 + torch.exp(x2y2)) * stride
-
-        xyxy = torch.cat((x1y1, x2y2), dim=4)
-        conf = torch.sigmoid(conf)
-        prob = torch.sigmoid(prob)
-        output = torch.cat((xyxy, conf, prob), 4)
-        output = output.view(bz, -1, 5 + self.numclass)
-        return output
-
-    def forward(self, input):
+    def forward(self, input, targets=None):
+        self.input_size = input.shape[-1]
         feat_small, feat_mid, feat_large = self.backbone(input)
         conv = self.headslarge(feat_large)
         convlarge = conv
+
         conv = self.mergelarge(convlarge)
-        # conv = self.headsmid(torch.cat((conv, feat_mid), dim=1))
         conv = self.headsmid(conv+feat_mid)
         convmid = conv
 
@@ -265,23 +215,81 @@ class StrongerV3_US_dummy(nn.Module):
         conv = self.headsmall(conv+feat_small)
         convsmall = conv
         if self.cfg.ASFF:
-            convlarge = self.ASFF_US0(convlarge, convmid, convsmall)
-            convmid = self.ASFF_US1(convlarge, convmid, convsmall)
-            convsmall = self.ASFF_US2(convlarge, convmid, convsmall)
+            convlarge = self.asff0(convlarge, convmid, convsmall)
+            convmid = self.asff1(convlarge, convmid, convsmall)
+            convsmall = self.asff2(convlarge, convmid, convsmall)
         outlarge = self.detlarge(convlarge)
         outmid = self.detmid(convmid)
         outsmall = self.detsmall(convsmall)
         if self.training:
+            assert targets is not None
             predlarge = self.decode(outlarge, 32)
             predmid = self.decode(outmid, 16)
             predsmall = self.decode(outsmall, 8)
+            return self.loss([predsmall, predmid, predlarge], targets)
         else:
             predlarge = self.decode_infer(outlarge, 32)
             predmid = self.decode_infer(outmid, 16)
             predsmall = self.decode_infer(outsmall, 8)
             pred = torch.cat([predsmall, predmid, predlarge], dim=1)
             return pred
-        return outsmall, outmid, outlarge, predsmall, predmid, predlarge
+
+    def build_target(self, bboxs: list, preds):
+        # get target for each image
+        batch_targets = []
+        batch_preds = []
+        for idx_img in range(preds[0].shape[0]):
+            batch_preds.append(torch.cat([p[idx_img] for p in preds], 0))
+        for bbox, pred in zip(bboxs, batch_preds):
+            batch_targets.append(self.yolo_target_single(bbox, pred))
+        batch_targets = torch.stack(batch_targets, 0)
+        return batch_targets
+
+    def yolo_target_single(self, target: torch.Tensor, pred: torch.Tensor):
+
+        bbox, class_label, mix_weight = target.split([4, 1, 1], dim=1)
+        class_label = class_label.long()
+        reg_area_limit = [0, 30, 90, 10000]
+        strides = [8, 16, 32]
+        target_lvl = [torch.zeros(self.input_size // strides[i], self.input_size // strides[i], self.gt_per_grid,
+                                  6 + self.numclass).cuda() for i in range(3)]
+        target_count = [torch.zeros(self.input_size // strides[i], self.input_size // strides[i]).long() for i in
+                        range(3)]
+        bbox_xywh = torch.cat([(bbox[:, 2:] + bbox[:, :2]) * 0.5,
+                               bbox[:, 2:] - bbox[:, :2]], dim=-1)
+        bboxarea = torch.sqrt(bbox_xywh[:, -2] * bbox_xywh[:, -1])
+        for i in range(3):
+            # initialize box weight 1
+            target_lvl[i][:, :, :, 5] = 1.0
+            valid_mask = (bboxarea > reg_area_limit[i]) & (bboxarea < reg_area_limit[i + 1])
+            for gt_xywh, class_index, gt_xyxy, box_weight in zip(bbox_xywh[valid_mask], class_label[valid_mask],
+                                                                 bbox[valid_mask], mix_weight[valid_mask]):
+                gt_xywh = (gt_xywh / strides[i]).long()
+                numgt = target_count[i][gt_xywh[1]][gt_xywh[0]]
+                delta = 0.01
+                if numgt==0 and self.gt_per_grid>1:
+                    for n in range(self.gt_per_grid):
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][:4] = gt_xyxy
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][4] = 1.0
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][5] = box_weight
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][6:] = 1.0 / self.numclass * delta
+                        target_lvl[i][gt_xywh[1]][gt_xywh[0]][n][6 + class_index] = (1.0 - delta) + 1.0 / self.numclass * delta
+                else:
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][:4] = gt_xyxy
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][4] = 1.0
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][5] = box_weight
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][6:] = 1.0 / self.numclass * delta
+                    target_lvl[i][gt_xywh[1]][gt_xywh[0]][numgt][6 + class_index] = (1.0 - delta) + 1.0 / self.numclass * delta
+                target_count[i][gt_xywh[1]][gt_xywh[0]] = min(self.gt_per_grid - 1,target_count[i][gt_xywh[1]][gt_xywh[0]] + 1)
+        target_lvl = [t.view(-1, 6 + self.numclass) for t in target_lvl]
+        target_lvl = torch.cat(target_lvl, 0)
+        iou = GIOUloss.bbox_overlaps(pred[:, :4], target[:, :4])
+        max_iou, _ = torch.max(iou, dim=-1)
+        max_iou = max_iou.unsqueeze(-1)
+        respond_bgd = (torch.ones_like(target_lvl[:, 4:5]) - target_lvl[:, 4:5]) * (max_iou < 0.5).float()
+        # respond_bgd = (torch.ones_like(target_lvl[:,4:5])- target_lvl[:,4:5])
+        target_lvl = torch.cat([target_lvl, respond_bgd], -1)
+        return target_lvl
 
 if __name__ == '__main__':
     import torch.onnx

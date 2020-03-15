@@ -25,6 +25,8 @@ MODEL:
   modeltype: StrongerV3
   backbone: 'mobilenetv2'
   backbone_pretrained: 'checkpoints/mobilenet_v2.pth'
+  gt_per_grid: 3
+
 EXPER:
   experiment_name: 'strongerv3'
 DATASET:

@@ -89,7 +89,7 @@ MODEL:
   clsfocal: True
   seprelu: False
 EXPER:
-  experiment_name: "coco512"
+  experiment_name: "coco5121gt"
   train_sizes: [480,512,544]
   test_size: 512
 
@@ -98,7 +98,7 @@ DATASET:
   dataset_root: '/datasets/coco'
 
 OPTIM:
-  batch_size: 24
+  batch_size: 12
   lr_initial: 2e-4
   total_epoch: 120
   milestones: [80,100]

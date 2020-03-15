@@ -25,9 +25,9 @@ class SlimmingPruner(BasePruner):
         y, i = torch.sort(bns)
 
 
-        # import numpy as np
-        # np.save('v2bn.npy',y)
-        # assert 0
+        import numpy as np
+        np.save('v3bn.npy',y)
+        assert 0
         prunelimit=(y==min(maxbn)).nonzero().item()/len(bns)
         print("prune limit: {}".format(prunelimit))
         if self.pruneratio>prunelimit:
