@@ -22,7 +22,7 @@ MODEL:
   "tvmonitor"
   ]
   numcls: 20
-  modeltype: StrongerV3_new
+  modeltype: StrongerV3
   backbone: 'mobilenetv2'
   backbone_pretrained: 'checkpoints/mobilenet_v2.pth'
   gt_per_grid: 1
@@ -42,6 +42,3 @@ OPTIM:
 Prune:
   sparse: True
   sr: 0.005
-  pruneratio: 0.5
-  bbOutName: ('backbone.features.6','backbone.features.13','backbone.features.18')
-  pruner: SlimmingPruner

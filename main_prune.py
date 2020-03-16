@@ -32,9 +32,9 @@ def main(args):
     flopsnew, paramsnew = profile(newmodel, inputs=(input, ),verbose=False)
     flopsnew, paramsnew = clever_format([flopsnew, paramsnew], "%.3f")
     print("flops:{}->{}, params: {}->{}".format(flops,flopsnew,params,paramsnew))
-    res=pruner.test_dist(model,cal_bn=False,valid_iter=10,ckpt='best')
-
-    assert 0
+    # res=pruner.test_dist(model,cal_bn=False,valid_iter=10,ckpt='best')
+    # res_pruned=pruner.test_dist(newmodel,cal_bn=False,valid_iter=10,ckpt='')
+    # print("sampple mAP {} -> {}".format(res,res_pruned))
     if not args.Prune.do_test:
         ## For AutoSlim, specify the ckpt
         if args.Prune.pruner=='AutoSlimPruner':
@@ -56,9 +56,8 @@ if __name__ == '__main__':
     parser.add_argument(
         "--config-file",
         # default='configs/strongerv3_US_prune.yaml'
-        default = 'configs/strongerv3_sparse3gt.yaml'
-        # default = 'configs/strongerv3_prune.yaml'
-        # default = 'configs/strongerv2_prune.yaml'
+        # default = 'configs/strongerv3_sparse1gt_prune.yaml'
+        default = 'configs/strongerv3_prune.yaml'
     )
 
     parser.add_argument(
@@ -70,6 +69,11 @@ if __name__ == '__main__':
     args = parser.parse_args()
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+    # specific config for pruning phase
+    cfg.EVAL.valid_epoch=0
+    cfg.debug=True
+    cfg.do_test=True
+    assert cfg.EXPER.resume!='',"You must load a checkpoint for pruning,try EXPER.resume best"
     # do not freeze
     # cfg.freeze()
     main(args=cfg)
