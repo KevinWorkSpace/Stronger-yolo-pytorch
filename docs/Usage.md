@@ -34,7 +34,17 @@ python main_prune.py --config-file configs/strongerv3_prune.yaml  EXPER.experime
 3 . Test the pruned model
 ```
 python main_prune.py --config-file configs/strongerv3_prune.yaml Prune.pruneratio 0.3 Prune.do_test True   
-```
-### Transfer back to Tensorflow and make it portable.
+```  
+## Custom Dataset support
+Organize your dataset like this and edit config_copy.yaml.
+- dataset_root
+    - JPEGImages
+        - xxx.jpg
+    - Annotations
+        - xxx.xml
+    - train.txt(no suffix like voc)
+    - val.txt
+
+# Transfer back to Tensorflow and make it portable.
 Check [MNN-yolov3](https://github.com/wlguan/MNN-yolov3).  
-- [ ] A pytorch->tensorflow script is underway.
+- [x] A pytorch->tensorflow script is finished.

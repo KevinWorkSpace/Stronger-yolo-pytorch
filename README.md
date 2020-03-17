@@ -10,7 +10,7 @@ python3.6, pytorch1.2(1.0+ should be ok), ubuntu14/16/18 tested.
 
 ## Quick Start
 All checkpoints as well as converted darknet can be downloaded here.[链接](https://pan.baidu.com/s/17VK455rp4B_SRhEmklT_ig) 提取码: i3pa  
-**See [Usage.md](docs/Usage.md) for details.** 
+**See [Usage.md](docs/Usage.md) for details. Custom dataset is also Supported!**
 ## Improvement with latest papers(Using StrongerV3 as baseline)
 ### All results all tested with 544*544 and threshold 0.1
 |model|mAP50|mAP75|configs|baseline|
