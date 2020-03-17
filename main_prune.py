@@ -2,7 +2,6 @@ from models import *
 from trainers import *
 import json
 from yacscfg import _C as cfg
-import os
 from torch import optim
 import argparse
 import numpy as np
@@ -57,7 +56,8 @@ if __name__ == '__main__':
         "--config-file",
         # default='configs/strongerv3_US_prune.yaml'
         # default = 'configs/strongerv3_sparse1gt_prune.yaml'
-        default = 'configs/strongerv3_prune.yaml'
+        # default = 'configs/strongerv3_prune.yaml'
+        default = 'configs/strongerv2_prune.yaml'
     )
 
     parser.add_argument(

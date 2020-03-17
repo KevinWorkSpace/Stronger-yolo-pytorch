@@ -46,6 +46,6 @@ Prune:
   bbOutName: ('backbone.features.6','backbone.features.13','backbone.features.18')
   pruner: SlimmingPruner
   use_optimal_thres: True
-  optimal_thres_ratio: 0.005
+  optimal_thres_ratio: 0.001
 finetune: True
 devices: 1,

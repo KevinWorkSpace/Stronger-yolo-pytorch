@@ -28,15 +28,15 @@ Note:
 |Model| Pruner|Backbone|mAP(before/after prune) | Flops(G)| Params(M)|
 | ------ | ------ | ------ | ------ |------ |------ |
 strongerv3|/|Mobilev2|79.6|4.33|6.775|
-strongerv3-(40% pruned)|Slimming |Mobilev2|77.4/76.9 |2.64|2.75|
-strongerv3-(pruned)|AutoSlim |Mobilev2|78.5/75.0|2.64|3.34|
+strongerv3-pruned|Slimming with OT|Mobilev2|77.4/77.5 |2.41|2.01|
+strongerv3-pruned|AutoSlim |Mobilev2|78.5/75.0|2.64|3.34|
 | ************* |*************|************* |*************|************* |************* |
 strongerv2| /|Darknet53|80.2|49.8|61.6|
-strongerv2-(70% pruned)|Slimming |Darknet53|78.1/77.1 |38.9|16.8|  
+strongerv2-pruned|Slimming with OT|Darknet53|78.1/77.9 |38.5|16.2|  
 
 Note:  
 1.Tuning _C.Prune.sr can get better prune ratio, I picked the official number 0.01.  
-
+2.OT is Optimal Threshold Finding method for each layer, **the mAP is even higher**!
 ## Deployment on mobile devices(Update 2019-12-14)
 check [deploy.md](docs/deploy.md) for more details.
 - [x] pytorch -> tensorflow pb
@@ -51,6 +51,7 @@ check [deploy.md](docs/deploy.md) for more details.
 ## Supported Pruner
 - [x] [l1-norm pruner](https://arxiv.org/abs/1608.08710)
 - [x] [Slimming pruner](https://arxiv.org/abs/1708.06519)
+- [x] [Optimal THresholding](https://arxiv.org/pdf/2003.04566.pdf) (Update 2020-3-16)
 - [x] [AutoSlim](https://arxiv.org/abs/1903.11728) (Update 2020-3-7)
 
 ## Reference

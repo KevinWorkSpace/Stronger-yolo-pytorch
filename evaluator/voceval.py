@@ -19,11 +19,10 @@ class EvaluatorVOC(Evaluator):
         super().__init__(anchors, cateNames, rootpath, score_thres, iou_thres)
 
     def reset(self):
-        self.coco_imgIds = set([])
         self.visual_imgs = []
         self.rec_pred = defaultdict(list)
 
-    def append(self, imgpath, nms_boxes, nms_scores, nms_labels, visualize=True):
+    def append(self, imgpath, nms_boxes, nms_scores, nms_labels, visualize=False):
         if nms_boxes is not None:  # do have bboxes
             for i in range(nms_boxes.shape[0]):
                 rec = {

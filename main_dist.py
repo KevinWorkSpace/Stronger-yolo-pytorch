@@ -36,7 +36,7 @@ def main(local_rank,ngpus_pernode,args,avail_port):
                        lrscheduler=scheduler
                        )
     if args.do_test:
-      _Trainer._valid_epoch(validiter=10,verbose=True,cal_bn=False,width_mult=0.7)
+      _Trainer._valid_epoch(validiter=-1,verbose=True,cal_bn=False,width_mult=0.7)
     else:
       _Trainer.train()
 

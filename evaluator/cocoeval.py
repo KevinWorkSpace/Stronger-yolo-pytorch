@@ -8,7 +8,7 @@ import numpy as np
 class EvaluatorCOCO(Evaluator):
     def __init__(self, anchors, cateNames, rootpath, score_thres, iou_thres):
         self.coco_imgIds = set([])
-        self.coco_results = []
+        self.rec_pred = []
         self.idx2cat = {
             "0": 1,
             "1": 2,
@@ -97,7 +97,7 @@ class EvaluatorCOCO(Evaluator):
 
     def reset(self):
         self.coco_imgIds = set([])
-        self.coco_results = []
+        self.rec_pred = []
         self.visual_imgs = []
 
     def build_GT(self):
@@ -108,7 +108,7 @@ class EvaluatorCOCO(Evaluator):
         if nms_boxes is not None:  # do have bboxes
             for i in range(nms_boxes.shape[0]):
                 self.coco_imgIds.add(imgid)
-                self.coco_results.append({
+                self.rec_pred.append({
                     "image_id": imgid,
                     "category_id": self.idx2cat[str(nms_labels[i])],
                     "bbox": [nms_boxes[i][0], nms_boxes[i][1], nms_boxes[i][2] - nms_boxes[i][0],
@@ -130,7 +130,7 @@ class EvaluatorCOCO(Evaluator):
 
     def evaluate(self):
         try:
-            cocoDt = self.cocoGt.loadRes(self.coco_results)
+            cocoDt = self.cocoGt.loadRes(self.rec_pred)
         except:
             print("no boxes detected, coco eval aborted")
             return [0.0]*12

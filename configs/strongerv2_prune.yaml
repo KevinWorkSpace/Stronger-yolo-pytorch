@@ -33,8 +33,8 @@ DATASET:
 OPTIM:
   batch_size: 8
   lr_initial: 2e-5
-  total_epoch: 3
-  milestones: [1,2]
+  total_epoch: 6
+  milestones: [2,4]
 EVAL:
   valid_epoch: 0
 Prune:
@@ -42,6 +42,7 @@ Prune:
   pruneratio: 0.7
   bbOutName: ('backbone.layer3.residual_7','backbone.layer4.residual_7','backbone.layer5.residual_3')
   pruner: SlimmingPruner
-
+  use_optimal_thres: True
+  optimal_thres_ratio: 0.001
 finetune: True
 devices: 1,

@@ -37,7 +37,7 @@ def freeze_graph(checkpoint_path, output_node_names, savename):
         input_data = tf.placeholder(dtype=tf.float32, shape=(1, INPUTSIZE, INPUTSIZE, 3), name='input_data')
         training = tf.placeholder(dtype=tf.bool, name='training')
     prefixdict = collectpth(checkpoint_path)
-    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE,gt_per_grid=3)
+    output = YOLOV3(training).build_network_dynamic(input_data, prefixdict, inputsize=INPUTSIZE,gt_per_grid=1)
     with tf.Session() as sess:
         output_graph_def = tf.graph_util.convert_variables_to_constants(
             sess=sess,
@@ -126,7 +126,7 @@ if __name__ == '__main__':
     ]
     savename = 'v3_prune'
     outnodes = "YoloV3/output/boxconcat"
-    ckptpath = 'checkpoints/strongerv3_sparse/checkpoint-ft-0.5.pth'
+    ckptpath = 'checkpoints/strongerv3_sparse1gt/checkpoint-ft-0.4.pth'
     testimg = '004650'
     freeze_graph(checkpoint_path=ckptpath, output_node_names=outnodes, savename='port2tf/assets/%s.pb' % savename)
     pb_test('port2tf/assets/%s.pb' % savename, outnodes)

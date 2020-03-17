@@ -1,5 +1,5 @@
 from utils.util import ensure_dir
-from dataset import get_COCO, get_VOC
+from dataset import get_COCO, get_VOC,get_Custom
 import os
 import time
 from dataset import makeImgPyramids
@@ -20,7 +20,7 @@ import torchvision
 import random
 from utils.dist_util import *
 from collections import OrderedDict, defaultdict
-
+from evaluator import EvaluatorCOCO,EvaluatorVOC
 
 class BaseTrainer:
     """
@@ -96,8 +96,16 @@ class BaseTrainer:
                     else:
                         newdict[k] = v
                 ckptfile['state_dict'] = newdict
+            # check the consistency
+            for k,v in ckptfile['state_dict'].items():
+                if k not in self.model.state_dict():
+                    ckptfile['state_dict'].pop(k)
+            for (k1,v1) in self.model.state_dict().items():
+                if k1 not in ckptfile['state_dict'] or ckptfile['state_dict'][k1].shape!=self.model.state_dict()[k1].shape:
+                    print("weight {} will be initialized from scratch".format(k1))
+                    ckptfile['state_dict'][k1]=self.model.state_dict()[k1]
             # just ignore the bn_not_save parameters
-            self.model.load_state_dict(ckptfile['state_dict'], strict=False)
+            self.model.load_state_dict(ckptfile['state_dict'], strict=True)
             # load_checkpoint(self.model,ckptfile)
             if not self.args.finetune and not self.args.do_test and not self.args.Prune.do_test:
                 self.optimizer.load_state_dict(ckptfile['opti_dict'])
@@ -219,21 +227,6 @@ class BaseTrainer:
         conf_loss = conf_loss.sum() / imgs.shape[0]
         prob_loss = prob_loss.sum() / imgs.shape[0]
         totalloss = bbox_loss + conf_loss + prob_loss
-        # imgs = imgs.cuda()
-        # labels = [label.cuda() for label in gtbox]
-        # label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = labels
-        # outsmall, outmid, outlarge, predsmall, predmid, predlarge = self.model(imgs)
-        # bbox_loss, conf_loss, prob_loss = yololoss(self.args.MODEL, outsmall, outmid, outlarge, predsmall, predmid,
-        #                                          predlarge,
-        #                                          label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes)
-        #
-        # bbox_loss = bbox_loss.sum() / imgs.shape[0]
-        # conf_loss = conf_loss.sum() / imgs.shape[0]
-        # prob_loss = prob_loss.sum() / imgs.shape[0]
-        # totalloss = bbox_loss + conf_loss + prob_loss
-        # print(conf_loss.sum(),prob_loss.sum(),bbox_loss.sum())
-        # print(totalloss.sum())
-        # assert 0
         self.optimizer.zero_grad()
         totalloss.backward()
         if self.args.Prune.sparse:
@@ -348,10 +341,15 @@ class BaseTrainer:
         ## accumulate prediction results across gpus
         results = all_gather(self.TESTevaluator.rec_pred)
         if is_main_process():
-            all_recs = defaultdict(list)
-            for rec in results:
-                for k, v in rec.items():
-                    all_recs[k].extend(v)
+            if isinstance(self.TESTevaluator,EvaluatorCOCO):
+                all_recs=[]
+                for rec in results:
+                    all_recs.extend(rec)
+            else:
+                all_recs = defaultdict(list)
+                for rec in results:
+                    for k, v in rec.items():
+                        all_recs[k].extend(v)
             self.TESTevaluator.rec_pred = all_recs
             results = self.TESTevaluator.evaluate()
             imgs = self.TESTevaluator.visual_imgs
